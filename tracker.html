@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MotionPlay Tracker</title>
+<style>
+  :root { --bg:#0d1020; --panel:#171b33; --ink:#eef1ff; --mut:#9aa3c7; --ok:#3ee08f; --warn:#ffc24a; --err:#ff5d6c; --acc:#5b8cff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display:flex; flex-direction:column; gap:10px; padding:12px 16px; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; letter-spacing:-0.01em; }
+  #status { padding:6px 12px; border-radius:999px; background:var(--panel); font-size:14px; }
+  #status.ok { color:var(--ok); } #status.warn { color:var(--warn); } #status.err { color:var(--err); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input { font-size:22px; width:120px; padding:8px 12px; border-radius:10px; border:1px solid #2c3361; background:#0f1430; color:var(--ink); letter-spacing:0.2em; text-align:center; }
+  button { font-size:16px; padding:10px 16px; border-radius:10px; border:0; background:var(--panel); color:var(--ink); cursor:pointer; }
+  button.primary { background:var(--acc); color:#fff; font-weight:600; }
+  button:disabled { opacity:0.4; }
+  label.chk { display:flex; gap:6px; align-items:center; color:var(--mut); font-size:14px; }
+  #stage { position:relative; flex:1; min-height:200px; background:#000; border-radius:14px; overflow:hidden; }
+  #video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; transform:scaleX(-1); opacity:0.55; }
+  #overlay { position:absolute; inset:0; width:100%; height:100%; }
+  #hint { position:absolute; left:12px; right:12px; bottom:12px; text-align:center; font-size:18px; font-weight:600; text-shadow:0 2px 6px #000; }
+  #stats { color:var(--mut); font-size:13px; display:flex; gap:16px; flex-wrap:wrap; }
+  #stats b { color:var(--ink); font-weight:600; }
+  .pill { padding:2px 8px; border-radius:6px; background:var(--panel); }
+  .pill.on { background:var(--acc); color:#fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MotionPlay · Tablet tracker</h1>
+  <div id="status">Not started</div>
+</header>
+
+<div class="row">
+  <input id="code" inputmode="numeric" maxlength="4" placeholder="TV code" aria-label="TV code">
+  <button id="startBtn" class="primary">Start &amp; connect</button>
+  <label class="chk"><input type="checkbox" id="accurate" style="width:auto"> Accurate mode (slower)</label>
+</div>
+
+<div id="stage">
+  <video id="video" playsinline muted></video>
+  <canvas id="overlay"></canvas>
+  <div id="hint">Put the tablet below the TV, step back 2–3 m, and fit your whole body in view.</div>
+</div>
+
+<div class="row">
+  <button data-go="menu">Menu</button>
+  <button data-go="fruit">Fruit Slash</button>
+  <button data-go="runner">Lane Runner</button>
+  <button id="calBtn">Recalibrate</button>
+</div>
+
+<div id="stats">
+  <span>Tracking <b id="fps">0</b> fps</span>
+  <span>Sending <b id="sendRate">0</b> /s</span>
+  <span>Lane <span class="pill" id="sLane">mid</span></span>
+  <span><span class="pill" id="sJump">jump</span> <span class="pill" id="sDuck">duck</span> <span class="pill" id="sUp">hands up</span></span>
+  <span id="calState">Not calibrated</span>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script type="module">
+import { FilesetResolver, PoseLandmarker } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+
+/* ============================================================
+   CONFIG — tune these if gestures feel too sensitive / too dull
+   ============================================================ */
+const CFG = {
+  peerPrefix: 'motionplay-v1-',
+  wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
+  modelLite: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+  modelFull: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
+  sendEveryMs: 30,          // ~33 messages/s max
+  // Lane: sideways hip shift, measured in shoulder-widths from your calibrated centre
+  laneOn: 0.5, laneOff: 0.28,
+  // Jump: shoulders AND hips rise, measured as a fraction of torso length
+  jumpOn: 0.11, jumpOff: 0.05,
+  // Duck: shoulders drop, fraction of torso length
+  duckOn: 0.22, duckOff: 0.12,
+  // Hand cursor box, in shoulder-widths around your shoulders
+  reachX: 5.0,              // total width the cursor spans
+  reachTop: 2.3,            // how far above shoulders = top of screen
+  reachH: 4.4,              // total height the cursor spans
+  calDelayMs: 1300, calDurMs: 1000,
+};
+
+// MediaPipe pose landmark indices
+const P = { NOSE:0, LSH:11, RSH:12, LEL:13, REL:14, LWR:15, RWR:16, LIDX:19, RIDX:20, LHIP:23, RHIP:24, LKN:25, RKN:26, LAN:27, RAN:28 };
+const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[15,19],[16,20]];
+
+const $ = s => document.querySelector(s);
+const video = $('#video'), overlay = $('#overlay'), octx = overlay.getContext('2d');
+
+const S = {
+  landmarker:null, running:false, lastVideoTime:-1,
+  peer:null, conn:null, code:'', retryTimer:null,
+  smooth:null, base:null, calib:null,
+  g:{ lane:0, jump:false, duck:false, up:false },
+  present:false, presentSince:0, warn:'',
+  frames:0, sends:0, lastStat:performance.now(), lastSend:0, wake:null,
+};
+
+/* ---------------- helpers ---------------- */
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const r3 = v => Math.round(v*1000)/1000;
+const mid = (a,b) => ({ X:(a.X+b.X)/2, Y:(a.Y+b.Y)/2, v:Math.min(a.v,b.v) });
+const dist = (a,b) => Math.hypot(a.X-b.X, a.Y-b.Y);
+function setStatus(text, cls=''){ const el=$('#status'); el.textContent=text; el.className=cls; }
+function setHint(t){ $('#hint').textContent = t; }
+
+/* ---------------- start-up ---------------- */
+try {
+  const qs = new URLSearchParams(location.search).get('code');
+  const saved = localStorage.getItem('mp-code');
+  $('#code').value = qs || saved || '';
+} catch { /* storage blocked — fine */ }
+
+$('#startBtn').addEventListener('click', start);
+$('#calBtn').addEventListener('click', () => startCalibration());
+document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => send({ t:'cmd', go:b.dataset.go })));
+
+async function start(){
+  const code = $('#code').value.trim();
+  try { localStorage.setItem('mp-code', code); } catch {}
+  $('#startBtn').disabled = true;
+  try {
+    if (!S.running) {
+      setStatus('Starting camera…');
+      await startCamera();
+      setStatus('Loading motion model…');
+      S.landmarker = await createLandmarker($('#accurate').checked);
+      S.running = true;
+      keepAwake();
+      requestAnimationFrame(loop);
+    }
+    if (/^\d{4}$/.test(code)) connect(code);
+    else setStatus('Tracking (enter the 4-digit TV code to connect)', 'warn');
+  } catch (e) {
+    console.error(e);
+    setStatus('Error: ' + (e.message || e), 'err');
+  } finally {
+    $('#startBtn').disabled = false;
+    $('#startBtn').textContent = 'Reconnect';
+  }
+}
+
+async function startCamera(){
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera needs HTTPS. Open this page from your https:// link.');
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio:false,
+    video:{ facingMode:'user', width:{ ideal:640 }, height:{ ideal:480 }, frameRate:{ ideal:30 } }
+  });
+  video.srcObject = stream;
+  await video.play();
+}
+
+async function createLandmarker(accurate){
+  const fileset = await FilesetResolver.forVisionTasks(CFG.wasm);
+  const opts = delegate => ({
+    baseOptions:{ modelAssetPath: accurate ? CFG.modelFull : CFG.modelLite, delegate },
+    runningMode:'VIDEO', numPoses:1,
+    minPoseDetectionConfidence:0.5, minPosePresenceConfidence:0.5, minTrackingConfidence:0.5,
+  });
+  try { return await PoseLandmarker.createFromOptions(fileset, opts('GPU')); }
+  catch (e) { console.warn('GPU delegate failed, using CPU', e); return await PoseLandmarker.createFromOptions(fileset, opts('CPU')); }
+}
+
+async function keepAwake(){ try { S.wake = await navigator.wakeLock?.request('screen'); } catch {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.running) keepAwake(); });
+
+/* ---------------- connection to the TV (WebRTC via PeerJS) ---------------- */
+function connect(code){
+  clearTimeout(S.retryTimer);
+  S.code = code;
+  if (S.conn) { try { S.conn.close(); } catch {} S.conn = null; }
+  if (S.peer && !S.peer.destroyed) {
+    if (S.peer.open) return dial();
+    return; // still opening — dial() will run on 'open'
+  }
+  setStatus('Connecting to TV ' + code + '…', 'warn');
+  const peer = new Peer(undefined, { debug:1 });
+  S.peer = peer;
+  peer.on('open', dial);
+  peer.on('disconnected', () => { try { peer.reconnect(); } catch {} });
+  peer.on('error', err => {
+    console.warn('peer error', err.type, err);
+    if (err.type === 'peer-unavailable') setStatus('No TV found with code ' + S.code + ' — check the number on the TV', 'err');
+    else setStatus('Connection problem (' + err.type + ') — retrying…', 'err');
+    scheduleRetry();
+  });
+}
+
+function dial(){
+  const conn = S.peer.connect(CFG.peerPrefix + S.code, { reliable:false, serialization:'json' });
+  conn.on('open', () => {
+    S.conn = conn;
+    setStatus('Connected to TV ' + S.code, 'ok');
+    send({ t:'hello', role:'tracker', calibrated: !!S.base });
+  });
+  conn.on('data', onTvMessage);
+  conn.on('close', () => { if (S.conn === conn) { S.conn = null; setStatus('TV disconnected — retrying…', 'warn'); scheduleRetry(); } });
+  conn.on('error', e => console.warn('conn error', e));
+}
+
+function scheduleRetry(){
+  clearTimeout(S.retryTimer);
+  S.retryTimer = setTimeout(() => { if (!S.conn && S.code) { if (S.peer?.open) dial(); else connect(S.code); } }, 3000);
+}
+
+function send(msg){ if (S.conn && S.conn.open) { try { S.conn.send(msg); } catch {} } }
+
+function onTvMessage(msg){
+  if (!msg || typeof msg !== 'object') return;
+  if (msg.t === 'calibrate') startCalibration();
+  if (msg.t === 'scene') setHint(msg.text || '');
+}
+
+/* ---------------- main tracking loop ---------------- */
+function loop(){
+  if (!S.running) return;
+  requestAnimationFrame(loop);
+  if (video.readyState < 2 || video.currentTime === S.lastVideoTime) return;
+  S.lastVideoTime = video.currentTime;
+
+  const now = performance.now();
+  let res;
+  try { res = S.landmarker.detectForVideo(video, now); } catch (e) { console.warn(e); return; }
+  S.frames++;
+
+  const lm = res?.landmarks?.[0];
+  const aspect = (video.videoWidth || 4) / (video.videoHeight || 3);
+  if (!lm) { handleNoPerson(now); drawOverlay(null, aspect); maybeSend(now, null); stats(now); return; }
+
+  // 1) Mirror (so moving right = right on TV) and convert to "height units" so X and Y share a scale
+  const raw = lm.map(p => ({ X:(1 - p.x) * aspect, Y:p.y, v: p.visibility ?? 1 }));
+
+  // 2) Adaptive smoothing: steady when still, snappy when moving fast
+  if (!S.smooth) S.smooth = raw.map(p => ({...p}));
+  for (let i = 0; i < raw.length; i++) {
+    const s = S.smooth[i], r = raw[i];
+    const d = Math.hypot(r.X - s.X, r.Y - s.Y);
+    const a = clamp(0.35 + d * 14, 0.35, 0.92);
+    s.X += (r.X - s.X) * a; s.Y += (r.Y - s.Y) * a; s.v = r.v;
+  }
+  const sm = S.smooth;
+
+  // 3) Body measurements
+  const body = measure(sm);
+  const ok = body.sh.v > 0.5;
+  if (!ok) { handleNoPerson(now); drawOverlay(sm, aspect); maybeSend(now, null); stats(now); return; }
+  if (!S.present) { S.present = true; S.presentSince = now; }
+
+  // 4) Calibration (auto on first sight, or when the TV/you ask)
+  if (!S.base && !S.calib && now - S.presentSince > 1500) startCalibration();
+  if (S.calib) runCalibration(now, body);
+
+  // 5) Gestures
+  detectGestures(body, sm);
+
+  // 6) Turn hands + skeleton into TV-screen coordinates (0..1)
+  const toScreen = p => screenMap(p, body);
+  const hl = sm[P.LIDX].v > 0.3 ? sm[P.LIDX] : sm[P.LWR];
+  const hr = sm[P.RIDX].v > 0.3 ? sm[P.RIDX] : sm[P.RWR];
+  // After mirroring, landmark 19 (your left hand) sits on the screen's left — natural "mirror" feel.
+  const a = toScreen(hl), b = toScreen(hr);
+  const hands = [ r3(clamp(a.x,0,1)), r3(clamp(a.y,0,1)), r3(hl.v), r3(clamp(b.x,0,1)), r3(clamp(b.y,0,1)), r3(hr.v) ];
+  const sk = [];
+  for (const p of sm) { const q = toScreen(p); sk.push(r3(q.x), r3(q.y), Math.round(p.v*100)/100); }
+
+  S.warn = body.hip.v < 0.4 ? 'Step back — I can’t see your hips' : '';
+  setHint(S.warn || (S.calib ? 'Hold still in the middle…' : ''));
+
+  drawOverlay(sm, aspect);
+  maybeSend(now, { hands, sk });
+  stats(now);
+}
+
+function measure(sm){
+  const sh = mid(sm[P.LSH], sm[P.RSH]);
+  const hip = mid(sm[P.LHIP], sm[P.RHIP]);
+  const shW = Math.max(0.02, dist(sm[P.LSH], sm[P.RSH]));
+  const torso = hip.v > 0.4 ? Math.max(0.05, dist(sh, hip)) : shW * 1.35;
+  return { sh, hip, shW, torso, nose: sm[P.NOSE] };
+}
+
+function screenMap(p, body){
+  // Body-relative mapping: the cursor box follows you, so you don't have to stand in one exact spot.
+  const w = S.base ? S.base.shW : body.shW;
+  return {
+    x: 0.5 + (p.X - body.sh.X) / (w * CFG.reachX),
+    y: (p.Y - (body.sh.Y - w * CFG.reachTop)) / (w * CFG.reachH),
+  };
+}
+
+function handleNoPerson(now){
+  S.present = false;
+  S.g.jump = S.g.duck = S.g.up = false;
+  setHint('I can’t see you — step into view');
+}
+
+/* ---------------- calibration ---------------- */
+function startCalibration(){
+  S.calib = { start: performance.now(), samples: [] };
+  $('#calState').textContent = 'Calibrating — stand still in the middle';
+}
+
+function runCalibration(now, body){
+  const c = S.calib, t = now - c.start;
+  if (t < CFG.calDelayMs) return;                       // give the player time to settle
+  if (t < CFG.calDelayMs + CFG.calDurMs) { c.samples.push(body); return; }
+  if (c.samples.length < 8) {                            // not enough good frames — keep trying
+    if (t > 6000) { S.calib = null; $('#calState').textContent = 'Calibration failed — tap Recalibrate'; }
+    return;
+  }
+  const avg = k => c.samples.reduce((s, b) => s + k(b), 0) / c.samples.length;
+  S.base = {
+    hipX: avg(b => b.hip.v > 0.4 ? b.hip.X : b.sh.X),
+    shY:  avg(b => b.sh.Y),
+    hipY: avg(b => b.hip.Y),
+    shW:  avg(b => b.shW),
+    torso:avg(b => b.torso),
+  };
+  S.calib = null;
+  S.g.lane = 0;
+  $('#calState').textContent = 'Calibrated ✓';
+  send({ t:'calibrated' });
+}
+
+/* ---------------- gesture detection (with hysteresis so states don't flicker) ---------------- */
+function detectGestures(body, sm){
+  const g = S.g;
+  // Hands up: both wrists above the nose
+  g.up = sm[P.LWR].Y < body.nose.Y && sm[P.RWR].Y < body.nose.Y && sm[P.LWR].v > 0.4 && sm[P.RWR].v > 0.4;
+  if (!S.base) return;
+  const B = S.base;
+
+  // Lane: where your hips are vs. your calibrated centre
+  const x = body.hip.v > 0.4 ? body.hip.X : body.sh.X;
+  const dx = (x - B.hipX) / B.shW;
+  if (g.lane === 0) { if (dx > CFG.laneOn) g.lane = 1; else if (dx < -CFG.laneOn) g.lane = -1; }
+  else if (g.lane === 1)  { if (dx < CFG.laneOff) g.lane = dx < -CFG.laneOn ? -1 : 0; }
+  else if (g.lane === -1) { if (dx > -CFG.laneOff) g.lane = dx > CFG.laneOn ? 1 : 0; }
+
+  // Jump / duck: vertical shoulder (and hip) movement relative to your torso length
+  const shUp = (B.shY - body.sh.Y) / B.torso;
+  const hipUp = body.hip.v > 0.4 ? (B.hipY - body.hip.Y) / B.torso : shUp;
+  if (!g.jump && shUp > CFG.jumpOn && hipUp > CFG.jumpOn * 0.7) g.jump = true;
+  else if (g.jump && shUp < CFG.jumpOff) g.jump = false;
+  if (!g.duck && -shUp > CFG.duckOn) g.duck = true;
+  else if (g.duck && -shUp < CFG.duckOff) g.duck = false;
+}
+
+/* ---------------- sending ---------------- */
+function maybeSend(now, data){
+  if (now - S.lastSend < CFG.sendEveryMs) return;
+  S.lastSend = now;
+  const msg = { t:'f', ts: Date.now(), present: !!data, warn: S.warn,
+    g: { lane:S.g.lane, jump:S.g.jump, duck:S.g.duck, up:S.g.up, cal: !!S.base } };
+  if (data) { msg.h = data.hands; msg.sk = data.sk; }
+  if (S.conn) { send(msg); S.sends++; }
+}
+
+/* ---------------- tablet preview ---------------- */
+function drawOverlay(sm, aspect){
+  const W = overlay.clientWidth, H = overlay.clientHeight;
+  if (overlay.width !== W) overlay.width = W;
+  if (overlay.height !== H) overlay.height = H;
+  octx.clearRect(0, 0, W, H);
+  if (!sm) return;
+  // match video's object-fit:contain box
+  let vw = W, vh = W / aspect; if (vh > H) { vh = H; vw = H * aspect; }
+  const ox = (W - vw) / 2, oy = (H - vh) / 2;
+  const px = p => [ox + (p.X / aspect) * vw, oy + p.Y * vh];
+  octx.lineWidth = 4; octx.lineCap = 'round'; octx.strokeStyle = '#5b8cff';
+  for (const [a, b] of BONES) {
+    if (sm[a].v < 0.4 || sm[b].v < 0.4) continue;
+    const [x1,y1] = px(sm[a]), [x2,y2] = px(sm[b]);
+    octx.beginPath(); octx.moveTo(x1,y1); octx.lineTo(x2,y2); octx.stroke();
+  }
+  for (const i of [P.LIDX, P.RIDX]) {
+    if (sm[i].v < 0.3) continue;
+    const [x,y] = px(sm[i]);
+    octx.fillStyle = i === P.LIDX ? '#29e3ff' : '#ff4fd8';
+    octx.beginPath(); octx.arc(x, y, 10, 0, Math.PI*2); octx.fill();
+  }
+  // calibrated centre line
+  if (S.base) {
+    const cx = ox + (S.base.hipX / aspect) * vw;
+    octx.strokeStyle = 'rgba(255,255,255,0.35)'; octx.setLineDash([8,8]); octx.lineWidth = 2;
+    octx.beginPath(); octx.moveTo(cx, oy); octx.lineTo(cx, oy + vh); octx.stroke(); octx.setLineDash([]);
+  }
+}
+
+function stats(now){
+  const g = S.g;
+  $('#sLane').textContent = g.lane === -1 ? 'left' : g.lane === 1 ? 'right' : 'mid';
+  $('#sJump').classList.toggle('on', g.jump);
+  $('#sDuck').classList.toggle('on', g.duck);
+  $('#sUp').classList.toggle('on', g.up);
+  if (now - S.lastStat < 1000) return;
+  const dt = (now - S.lastStat) / 1000;
+  $('#fps').textContent = Math.round(S.frames / dt);
+  $('#sendRate').textContent = Math.round(S.sends / dt);
+  S.frames = 0; S.sends = 0; S.lastStat = now;
+}
+</script>
+</body>
+</html>
