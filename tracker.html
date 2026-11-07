@@ -14,12 +14,13 @@
   #status { padding:6px 12px; border-radius:999px; background:var(--panel); font-size:14px; }
   #status.ok { color:var(--ok); } #status.warn { color:var(--warn); } #status.err { color:var(--err); }
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  input { font-size:22px; width:120px; padding:8px 12px; border-radius:10px; border:1px solid #2c3361; background:#0f1430; color:var(--ink); letter-spacing:0.2em; text-align:center; }
+  input[type=text], input:not([type]) { font-size:22px; width:120px; padding:8px 12px; border-radius:10px; border:1px solid #2c3361; background:#0f1430; color:var(--ink); letter-spacing:0.2em; text-align:center; }
   button { font-size:16px; padding:10px 16px; border-radius:10px; border:0; background:var(--panel); color:var(--ink); cursor:pointer; }
   button.primary { background:var(--acc); color:#fff; font-weight:600; }
   button:disabled { opacity:0.4; }
   label.chk { display:flex; gap:6px; align-items:center; color:var(--mut); font-size:14px; }
   #stage { position:relative; flex:1; min-height:200px; background:#000; border-radius:14px; overflow:hidden; }
+  #stage.saver video, #stage.saver canvas { visibility:hidden; }
   #video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; transform:scaleX(-1); opacity:0.55; }
   #overlay { position:absolute; inset:0; width:100%; height:100%; }
   #hint { position:absolute; left:12px; right:12px; bottom:12px; text-align:center; font-size:18px; font-weight:600; text-shadow:0 2px 6px #000; }
@@ -38,7 +39,8 @@
 <div class="row">
   <input id="code" inputmode="numeric" maxlength="4" placeholder="TV code" aria-label="TV code">
   <button id="startBtn" class="primary">Start &amp; connect</button>
-  <label class="chk"><input type="checkbox" id="accurate" style="width:auto"> Accurate mode (slower)</label>
+  <label class="chk"><input type="checkbox" id="accurate"> Accurate mode (slower)</label>
+  <label class="chk"><input type="checkbox" id="saver"> Hide preview (faster)</label>
 </div>
 
 <div id="stage">
@@ -51,12 +53,13 @@
   <button data-go="menu">Menu</button>
   <button data-go="fruit">Fruit Slash</button>
   <button data-go="runner">Lane Runner</button>
+  <button data-go="zombie">Zombie Siege</button>
   <button id="calBtn">Recalibrate</button>
 </div>
 
 <div id="stats">
   <span>Tracking <b id="fps">0</b> fps</span>
-  <span>Sending <b id="sendRate">0</b> /s</span>
+  <span>Delay <b id="lat">–</b></span>
   <span>Lane <span class="pill" id="sLane">mid</span></span>
   <span><span class="pill" id="sJump">jump</span> <span class="pill" id="sDuck">duck</span> <span class="pill" id="sUp">hands up</span></span>
   <span id="calState">Not calibrated</span>
@@ -74,50 +77,74 @@ const CFG = {
   wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
   modelLite: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
   modelFull: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
-  sendEveryMs: 30,          // ~33 messages/s max
-  // Lane: sideways hip shift, measured in shoulder-widths from your calibrated centre
+  maxSendHz: 45,            // send every tracked frame, up to this rate
+  // Lane: sideways hip shift, in shoulder-widths from your calibrated centre
   laneOn: 0.5, laneOff: 0.28,
-  // Jump: shoulders AND hips rise, measured as a fraction of torso length
-  jumpOn: 0.11, jumpOff: 0.05,
-  // Duck: shoulders drop, fraction of torso length
+  // Jump: shoulders AND hips rise (fraction of torso length), or a fast upward push
+  jumpOn: 0.10, jumpOff: 0.05, jumpVel: 0.9,
+  // Duck: shoulders drop (fraction of torso length)
   duckOn: 0.22, duckOff: 0.12,
-  // Hand cursor box, in shoulder-widths around your shoulders
-  reachX: 5.0,              // total width the cursor spans
-  reachTop: 2.3,            // how far above shoulders = top of screen
-  reachH: 4.4,              // total height the cursor spans
+  // Hand cursor box, in shoulder-widths around your shoulders (smaller = less arm travel)
+  reachX: 4.4, reachTop: 2.1, reachH: 4.0,
+  handReach: 0.6,           // cursor point: 0 = wrist, 1 = index knuckle
+  handHoldMs: 160,          // keep a hand alive this long when motion blur hides it
+  // One Euro filters: higher beta = snappier when moving fast, higher minCutoff = less smoothing when still
+  bodyFilter: { minCutoff: 1.0, beta: 4.0, dCutoff: 1.0 },
+  handFilter: { minCutoff: 1.7, beta: 5.0, dCutoff: 1.0 },
+  drift: 0.004,             // how fast your calibrated centre follows you while you stand still
   calDelayMs: 1300, calDurMs: 1000,
 };
+window.MP = { CFG };        // handy for tuning from the browser console
 
-// MediaPipe pose landmark indices
-const P = { NOSE:0, LSH:11, RSH:12, LEL:13, REL:14, LWR:15, RWR:16, LIDX:19, RIDX:20, LHIP:23, RHIP:24, LKN:25, RKN:26, LAN:27, RAN:28 };
+const P = { NOSE:0, LSH:11, RSH:12, LEL:13, REL:14, LWR:15, RWR:16, LIDX:19, RIDX:20, LHIP:23, RHIP:24 };
 const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[15,19],[16,20]];
 
 const $ = s => document.querySelector(s);
 const video = $('#video'), overlay = $('#overlay'), octx = overlay.getContext('2d');
 
+/* ---------------- One Euro filter: smooth when still, near-zero lag when moving fast ---------------- */
+const alphaFor = (cutoff, dt) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
+class OneEuro {
+  constructor(p){ this.p = p; this.reset(); }
+  reset(){ this.x = null; this.dx = 0; this.v = 0; }
+  filter(x, dt){
+    if (this.x === null) { this.x = x; this.dx = 0; this.v = 0; return x; }
+    const d = (x - this.x) / dt;
+    this.dx += alphaFor(this.p.dCutoff, dt) * (d - this.dx);
+    this.v = this.dx;
+    const cutoff = this.p.minCutoff + this.p.beta * Math.abs(this.dx);
+    this.x += alphaFor(cutoff, dt) * (x - this.x);
+    return this.x;
+  }
+}
+
 const S = {
-  landmarker:null, running:false, lastVideoTime:-1,
+  landmarker:null, running:false, lastVideoTime:-1, lastT:0,
   peer:null, conn:null, code:'', retryTimer:null,
-  smooth:null, base:null, calib:null,
-  g:{ lane:0, jump:false, duck:false, up:false },
-  present:false, presentSince:0, warn:'',
-  frames:0, sends:0, lastStat:performance.now(), lastSend:0, wake:null,
+  bodyF: Array.from({ length:33 }, () => [new OneEuro(CFG.bodyFilter), new OneEuro(CFG.bodyFilter)]),
+  sm:null, base:null, calib:null,
+  hands:[0, 1].map(() => ({ fx:new OneEuro(CFG.handFilter), fy:new OneEuro(CFG.handFilter), x:0.5, y:0.5, v:0, seen:-1e9 })),
+  g:{ lane:0, jump:false, duck:false, up:false }, jumpAt:0, jumpEnd:0,
+  present:false, presentSince:0, lostAt:0, warn:'',
+  frames:0, lastStat:performance.now(), lastSend:0, wake:null, saver:false,
 };
 
-/* ---------------- helpers ---------------- */
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
 const r3 = v => Math.round(v*1000)/1000;
 const mid = (a,b) => ({ X:(a.X+b.X)/2, Y:(a.Y+b.Y)/2, v:Math.min(a.v,b.v) });
 const dist = (a,b) => Math.hypot(a.X-b.X, a.Y-b.Y);
 function setStatus(text, cls=''){ const el=$('#status'); el.textContent=text; el.className=cls; }
-function setHint(t){ $('#hint').textContent = t; }
+let lastHint = '';
+function setHint(t){ if (t !== lastHint) { $('#hint').textContent = t; lastHint = t; } }
 
 /* ---------------- start-up ---------------- */
 try {
   const qs = new URLSearchParams(location.search).get('code');
-  const saved = localStorage.getItem('mp-code');
-  $('#code').value = qs || saved || '';
-} catch { /* storage blocked — fine */ }
+  $('#code').value = qs || localStorage.getItem('mp-code') || '';
+  $('#saver').checked = localStorage.getItem('mp-saver') === '1';
+} catch {}
+S.saver = $('#saver').checked; $('#stage').classList.toggle('saver', S.saver);
+$('#saver').addEventListener('change', e => { S.saver = e.target.checked; $('#stage').classList.toggle('saver', S.saver); try { localStorage.setItem('mp-saver', S.saver ? '1' : '0'); } catch {} });
 
 $('#startBtn').addEventListener('click', start);
 $('#calBtn').addEventListener('click', () => startCalibration());
@@ -135,7 +162,7 @@ async function start(){
       S.landmarker = await createLandmarker($('#accurate').checked);
       S.running = true;
       keepAwake();
-      requestAnimationFrame(loop);
+      scheduleNext();
     }
     if (/^\d{4}$/.test(code)) connect(code);
     else setStatus('Tracking (enter the 4-digit TV code to connect)', 'warn');
@@ -152,7 +179,7 @@ async function startCamera(){
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera needs HTTPS. Open this page from your https:// link.');
   const stream = await navigator.mediaDevices.getUserMedia({
     audio:false,
-    video:{ facingMode:'user', width:{ ideal:640 }, height:{ ideal:480 }, frameRate:{ ideal:30 } }
+    video:{ facingMode:'user', width:{ ideal:640 }, height:{ ideal:480 }, frameRate:{ ideal:30, max:30 } }
   });
   video.srcObject = stream;
   await video.play();
@@ -177,10 +204,7 @@ function connect(code){
   clearTimeout(S.retryTimer);
   S.code = code;
   if (S.conn) { try { S.conn.close(); } catch {} S.conn = null; }
-  if (S.peer && !S.peer.destroyed) {
-    if (S.peer.open) return dial();
-    return; // still opening — dial() will run on 'open'
-  }
+  if (S.peer && !S.peer.destroyed) { if (S.peer.open) dial(); return; }
   setStatus('Connecting to TV ' + code + '…', 'warn');
   const peer = new Peer(undefined, { debug:1 });
   S.peer = peer;
@@ -216,66 +240,90 @@ function send(msg){ if (S.conn && S.conn.open) { try { S.conn.send(msg); } catch
 function onTvMessage(msg){
   if (!msg || typeof msg !== 'object') return;
   if (msg.t === 'calibrate') startCalibration();
-  if (msg.t === 'scene') setHint(msg.text || '');
+  if (msg.t === 'scene') sceneHint = msg.text || '';
+  if (msg.t === 'pong') { const rtt = performance.now() - msg.ts; $('#lat').textContent = Math.round(rtt / 2 + 1000 / 30) + ' ms'; }
 }
+let sceneHint = '';
+setInterval(() => send({ t:'ping', ts: performance.now() }), 2000);
 
 /* ---------------- main tracking loop ---------------- */
-function loop(){
+// requestVideoFrameCallback runs exactly once per new camera frame (lower delay, less wasted work)
+const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+function scheduleNext(){ if (hasRVFC) video.requestVideoFrameCallback(() => tick()); else requestAnimationFrame(tick); }
+
+function tick(){
   if (!S.running) return;
-  requestAnimationFrame(loop);
+  scheduleNext();
   if (video.readyState < 2 || video.currentTime === S.lastVideoTime) return;
   S.lastVideoTime = video.currentTime;
 
   const now = performance.now();
+  const dt = clamp((now - (S.lastT || now - 33)) / 1000, 0.005, 0.2);
+  S.lastT = now;
   let res;
   try { res = S.landmarker.detectForVideo(video, now); } catch (e) { console.warn(e); return; }
   S.frames++;
 
   const lm = res?.landmarks?.[0];
   const aspect = (video.videoWidth || 4) / (video.videoHeight || 3);
-  if (!lm) { handleNoPerson(now); drawOverlay(null, aspect); maybeSend(now, null); stats(now); return; }
+  if (!lm) { noPerson(now); finish(now, null, null, aspect); return; }
 
-  // 1) Mirror (so moving right = right on TV) and convert to "height units" so X and Y share a scale
+  // 1) Mirror (moving right = right on TV) and convert to "height units" so X and Y share a scale
   const raw = lm.map(p => ({ X:(1 - p.x) * aspect, Y:p.y, v: p.visibility ?? 1 }));
 
-  // 2) Adaptive smoothing: steady when still, snappy when moving fast
-  if (!S.smooth) S.smooth = raw.map(p => ({...p}));
-  for (let i = 0; i < raw.length; i++) {
-    const s = S.smooth[i], r = raw[i];
-    const d = Math.hypot(r.X - s.X, r.Y - s.Y);
-    const a = clamp(0.35 + d * 14, 0.35, 0.92);
-    s.X += (r.X - s.X) * a; s.Y += (r.Y - s.Y) * a; s.v = r.v;
-  }
-  const sm = S.smooth;
+  // 2) Filter the body. If you were gone for a while, restart the filters so nothing slides in from the old spot.
+  if (now - S.lostAt < 1e9 && !S.present && now - S.lostAt > 500) for (const f of S.bodyF) { f[0].reset(); f[1].reset(); }
+  const sm = raw.map((p, i) => ({ X: S.bodyF[i][0].filter(p.X, dt), Y: S.bodyF[i][1].filter(p.Y, dt), v: p.v }));
+  S.sm = sm;
 
-  // 3) Body measurements
   const body = measure(sm);
-  const ok = body.sh.v > 0.5;
-  if (!ok) { handleNoPerson(now); drawOverlay(sm, aspect); maybeSend(now, null); stats(now); return; }
+  body.shVy = (S.bodyF[P.LSH][1].v + S.bodyF[P.RSH][1].v) / 2;   // + = moving down
+  if (body.sh.v < 0.5) { noPerson(now); finish(now, sm, null, aspect); return; }
   if (!S.present) { S.present = true; S.presentSince = now; }
 
-  // 4) Calibration (auto on first sight, or when the TV/you ask)
+  // 3) Calibration (auto on first sight, or when the TV/you ask)
   if (!S.base && !S.calib && now - S.presentSince > 1500) startCalibration();
   if (S.calib) runCalibration(now, body);
 
-  // 5) Gestures
-  detectGestures(body, sm);
+  // 4) Gestures
+  detectGestures(body, sm, now);
 
-  // 6) Turn hands + skeleton into TV-screen coordinates (0..1)
-  const toScreen = p => screenMap(p, body);
-  const hl = sm[P.LIDX].v > 0.3 ? sm[P.LIDX] : sm[P.LWR];
-  const hr = sm[P.RIDX].v > 0.3 ? sm[P.RIDX] : sm[P.RWR];
-  // After mirroring, landmark 19 (your left hand) sits on the screen's left — natural "mirror" feel.
-  const a = toScreen(hl), b = toScreen(hr);
-  const hands = [ r3(clamp(a.x,0,1)), r3(clamp(a.y,0,1)), r3(hl.v), r3(clamp(b.x,0,1)), r3(clamp(b.y,0,1)), r3(hr.v) ];
+  // 5) Hands → TV screen (0..1). Raw landmarks + a fast hand filter = less lag than filtering twice.
+  const handsOut = [
+    trackHand(0, raw[P.LWR], raw[P.LIDX], raw[P.LEL], body, dt, now),
+    trackHand(1, raw[P.RWR], raw[P.RIDX], raw[P.REL], body, dt, now),
+  ];
+  const h = [];
+  for (const o of handsOut) h.push(r3(clamp(o.x, -0.05, 1.05)), r3(clamp(o.y, -0.05, 1.05)), Math.round(o.v * 100) / 100);
   const sk = [];
-  for (const p of sm) { const q = toScreen(p); sk.push(r3(q.x), r3(q.y), Math.round(p.v*100)/100); }
+  for (const p of sm) { const q = screenMap(p, body); sk.push(r3(q.x), r3(q.y), Math.round(p.v * 100) / 100); }
 
   S.warn = body.hip.v < 0.4 ? 'Step back — I can’t see your hips' : '';
-  setHint(S.warn || (S.calib ? 'Hold still in the middle…' : ''));
+  setHint(S.warn || (S.calib ? 'Hold still in the middle…' : sceneHint));
+  finish(now, sm, { h, sk }, aspect, handsOut);
+}
 
-  drawOverlay(sm, aspect);
-  maybeSend(now, { hands, sk });
+function trackHand(k, wr, ix, el, body, dt, now){
+  const H = S.hands[k];
+  const vis = Math.max(wr.v, ix.v * 0.9);
+  if (vis > 0.2) {
+    let X = wr.X, Y = wr.Y;
+    if (ix.v > 0.25 && wr.v > 0.2) { X += (ix.X - wr.X) * CFG.handReach; Y += (ix.Y - wr.Y) * CFG.handReach; }
+    else if (el.v > 0.2) { X += (wr.X - el.X) * 0.15; Y += (wr.Y - el.Y) * 0.15; }
+    if (now - H.seen > CFG.handHoldMs) { H.fx.reset(); H.fy.reset(); }
+    const s = screenMap({ X, Y }, body);
+    H.x = H.fx.filter(s.x, dt); H.y = H.fy.filter(s.y, dt); H.v = vis; H.seen = now;
+    return { x:H.x, y:H.y, v:vis };
+  }
+  // Fast swipes blur the hand and the camera briefly loses it — coast along the last direction
+  const age = (now - H.seen) / 1000;
+  if (age * 1000 < CFG.handHoldMs) return { x: H.x + H.fx.v * age, y: H.y + H.fy.v * age, v: 0.25 };
+  return { x:H.x, y:H.y, v:vis };
+}
+
+function finish(now, sm, data, aspect, handsOut){
+  if (!S.saver) drawOverlay(sm, aspect, handsOut);
+  maybeSend(now, data);
   stats(now);
 }
 
@@ -296,7 +344,8 @@ function screenMap(p, body){
   };
 }
 
-function handleNoPerson(now){
+function noPerson(now){
+  if (S.present) S.lostAt = now;
   S.present = false;
   S.g.jump = S.g.duck = S.g.up = false;
   setHint('I can’t see you — step into view');
@@ -310,9 +359,9 @@ function startCalibration(){
 
 function runCalibration(now, body){
   const c = S.calib, t = now - c.start;
-  if (t < CFG.calDelayMs) return;                       // give the player time to settle
+  if (t < CFG.calDelayMs) return;
   if (t < CFG.calDelayMs + CFG.calDurMs) { c.samples.push(body); return; }
-  if (c.samples.length < 8) {                            // not enough good frames — keep trying
+  if (c.samples.length < 8) {
     if (t > 6000) { S.calib = null; $('#calState').textContent = 'Calibration failed — tap Recalibrate'; }
     return;
   }
@@ -330,12 +379,13 @@ function runCalibration(now, body){
   send({ t:'calibrated' });
 }
 
-/* ---------------- gesture detection (with hysteresis so states don't flicker) ---------------- */
-function detectGestures(body, sm){
+/* ---------------- gesture detection (hysteresis so states don't flicker) ---------------- */
+function detectGestures(body, sm, now){
   const g = S.g;
-  // Hands up: both wrists above the nose
-  g.up = sm[P.LWR].Y < body.nose.Y && sm[P.RWR].Y < body.nose.Y && sm[P.LWR].v > 0.4 && sm[P.RWR].v > 0.4;
-  if (!S.base) return;
+  // Hands up = both wrists clearly above the top of your head (so aiming high doesn't trigger it)
+  const top = body.nose.Y - body.shW * 0.6;
+  g.up = sm[P.LWR].Y < top && sm[P.RWR].Y < top && sm[P.LWR].v > 0.4 && sm[P.RWR].v > 0.4;
+  if (!S.base || S.calib) return;
   const B = S.base;
 
   // Lane: where your hips are vs. your calibrated centre
@@ -345,33 +395,44 @@ function detectGestures(body, sm){
   else if (g.lane === 1)  { if (dx < CFG.laneOff) g.lane = dx < -CFG.laneOn ? -1 : 0; }
   else if (g.lane === -1) { if (dx > -CFG.laneOff) g.lane = dx > CFG.laneOn ? 1 : 0; }
 
-  // Jump / duck: vertical shoulder (and hip) movement relative to your torso length
+  // Jump / duck: vertical movement relative to torso length. A fast upward push triggers the jump early.
   const shUp = (B.shY - body.sh.Y) / B.torso;
   const hipUp = body.hip.v > 0.4 ? (B.hipY - body.hip.Y) / B.torso : shUp;
-  if (!g.jump && shUp > CFG.jumpOn && hipUp > CFG.jumpOn * 0.7) g.jump = true;
-  else if (g.jump && shUp < CFG.jumpOff) g.jump = false;
-  if (!g.duck && -shUp > CFG.duckOn) g.duck = true;
+  const upVel = -body.shVy / B.torso;
+  const wasJump = g.jump;
+  if (!g.jump && ((shUp > CFG.jumpOn && hipUp > CFG.jumpOn * 0.6) ||
+                  (upVel > CFG.jumpVel && shUp > CFG.jumpOn * 0.45 && hipUp > CFG.jumpOn * 0.3))) { g.jump = true; S.jumpAt = now; }
+  else if (g.jump && shUp < CFG.jumpOff && now - S.jumpAt > 120) g.jump = false;
+  if (wasJump && !g.jump) S.jumpEnd = now;
+  if (!g.duck && -shUp > CFG.duckOn && now - S.jumpEnd > 250) g.duck = true;
   else if (g.duck && -shUp < CFG.duckOff) g.duck = false;
+
+  // Drift correction: while you stand still in the middle, slowly re-centre on you
+  if (g.lane === 0 && !g.jump && !g.duck && Math.abs(dx) < CFG.laneOff * 0.8 && Math.abs(shUp) < CFG.jumpOff) {
+    const a = CFG.drift;
+    B.hipX += (x - B.hipX) * a; B.shY += (body.sh.Y - B.shY) * a;
+    if (body.hip.v > 0.4) B.hipY += (body.hip.Y - B.hipY) * a;
+    B.shW += (body.shW - B.shW) * a * 0.5; B.torso += (body.torso - B.torso) * a * 0.5;
+  }
 }
 
 /* ---------------- sending ---------------- */
 function maybeSend(now, data){
-  if (now - S.lastSend < CFG.sendEveryMs) return;
+  if (now - S.lastSend < 1000 / CFG.maxSendHz) return;
   S.lastSend = now;
-  const msg = { t:'f', ts: Date.now(), present: !!data, warn: S.warn,
+  const msg = { t:'f', ts: Math.round(now * 10) / 10, present: !!data, warn: S.warn,
     g: { lane:S.g.lane, jump:S.g.jump, duck:S.g.duck, up:S.g.up, cal: !!S.base } };
-  if (data) { msg.h = data.hands; msg.sk = data.sk; }
-  if (S.conn) { send(msg); S.sends++; }
+  if (data) { msg.h = data.h; msg.sk = data.sk; }
+  send(msg);
 }
 
 /* ---------------- tablet preview ---------------- */
-function drawOverlay(sm, aspect){
+function drawOverlay(sm, aspect, handsOut){
   const W = overlay.clientWidth, H = overlay.clientHeight;
   if (overlay.width !== W) overlay.width = W;
   if (overlay.height !== H) overlay.height = H;
   octx.clearRect(0, 0, W, H);
   if (!sm) return;
-  // match video's object-fit:contain box
   let vw = W, vh = W / aspect; if (vh > H) { vh = H; vw = H * aspect; }
   const ox = (W - vw) / 2, oy = (H - vh) / 2;
   const px = p => [ox + (p.X / aspect) * vw, oy + p.Y * vh];
@@ -387,7 +448,6 @@ function drawOverlay(sm, aspect){
     octx.fillStyle = i === P.LIDX ? '#29e3ff' : '#ff4fd8';
     octx.beginPath(); octx.arc(x, y, 10, 0, Math.PI*2); octx.fill();
   }
-  // calibrated centre line
   if (S.base) {
     const cx = ox + (S.base.hipX / aspect) * vw;
     octx.strokeStyle = 'rgba(255,255,255,0.35)'; octx.setLineDash([8,8]); octx.lineWidth = 2;
@@ -402,10 +462,8 @@ function stats(now){
   $('#sDuck').classList.toggle('on', g.duck);
   $('#sUp').classList.toggle('on', g.up);
   if (now - S.lastStat < 1000) return;
-  const dt = (now - S.lastStat) / 1000;
-  $('#fps').textContent = Math.round(S.frames / dt);
-  $('#sendRate').textContent = Math.round(S.sends / dt);
-  S.frames = 0; S.sends = 0; S.lastStat = now;
+  $('#fps').textContent = Math.round(S.frames / ((now - S.lastStat) / 1000));
+  S.frames = 0; S.lastStat = now;
 }
 </script>
 </body>
