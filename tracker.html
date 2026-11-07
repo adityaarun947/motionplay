@@ -41,6 +41,7 @@
   <button id="startBtn" class="primary">Start &amp; connect</button>
   <label class="chk"><input type="checkbox" id="accurate"> Accurate mode (slower)</label>
   <label class="chk"><input type="checkbox" id="saver"> Hide preview (faster)</label>
+  <label class="chk"><input type="checkbox" id="precise"> Precise hands (better aim, slower)</label>
 </div>
 
 <div id="stage">
@@ -54,6 +55,9 @@
   <button data-go="fruit">Fruit Slash</button>
   <button data-go="runner">Lane Runner</button>
   <button data-go="zombie">Zombie Siege</button>
+  <button data-go="fithub">Fit Zone</button>
+  <button data-go="locker">Customize</button>
+  <button id="musicBtn">♪ Music</button>
   <button id="calBtn">Recalibrate</button>
 </div>
 
@@ -63,11 +67,12 @@
   <span>Lane <span class="pill" id="sLane">mid</span></span>
   <span><span class="pill" id="sJump">jump</span> <span class="pill" id="sDuck">duck</span> <span class="pill" id="sUp">hands up</span></span>
   <span id="calState">Not calibrated</span>
+  <span id="note"></span>
 </div>
 
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script type="module">
-import { FilesetResolver, PoseLandmarker } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+import { FilesetResolver, PoseLandmarker, HandLandmarker } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 
 /* ============================================================
    CONFIG — tune these if gestures feel too sensitive / too dull
@@ -93,6 +98,11 @@ const CFG = {
   handFilter: { minCutoff: 1.7, beta: 5.0, dCutoff: 1.0 },
   drift: 0.004,             // how fast your calibrated centre follows you while you stand still
   calDelayMs: 1300, calDurMs: 1000,
+  // Precise hands: an extra hand-finger model that makes aiming much steadier (costs some fps)
+  handModel: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+  handEvery: 2,             // run it on every 2nd camera frame
+  handMatch: 0.3,           // a detected hand must be this close (in body-heights) to a pose wrist
+  handFresh: 170,           // ms a precise reading stays valid
 };
 window.MP = { CFG };        // handy for tuning from the browser console
 
@@ -127,6 +137,8 @@ const S = {
   g:{ lane:0, jump:false, duck:false, up:false }, jumpAt:0, jumpEnd:0,
   present:false, presentSince:0, lostAt:0, warn:'',
   frames:0, lastStat:performance.now(), lastSend:0, wake:null, saver:false,
+  precise:false, handLm:null, handLoading:false, hp:[{ X:0, Y:0, t:-1e9 }, { X:0, Y:0, t:-1e9 }], frameNo:0,
+  fb:false, prevKey:null, mv:0,
 };
 
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
@@ -149,6 +161,30 @@ $('#saver').addEventListener('change', e => { S.saver = e.target.checked; $('#st
 $('#startBtn').addEventListener('click', start);
 $('#calBtn').addEventListener('click', () => startCalibration());
 document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => send({ t:'cmd', go:b.dataset.go })));
+$('#musicBtn').addEventListener('click', () => send({ t:'cmd', music:'toggle' }));
+function note(t){ $('#note').textContent = t; }
+try { $('#precise').checked = localStorage.getItem('mp-precise') === '1'; } catch {}
+$('#precise').addEventListener('change', e => { try { localStorage.setItem('mp-precise', e.target.checked ? '1' : '0'); } catch {} setPrecise(e.target.checked); });
+
+// Optional extra model that tracks the fingers directly. Fails safe: if it can't load, normal tracking carries on.
+async function setPrecise(on){
+  S.precise = on;
+  if (!on) { note(''); return; }
+  if (S.handLm || S.handLoading || !S.running) { if (S.handLm) note('Precise hands on'); return; }
+  S.handLoading = true; note('Loading precise hand model…');
+  try {
+    const fileset = await FilesetResolver.forVisionTasks(CFG.wasm);
+    const make = delegate => HandLandmarker.createFromOptions(fileset, {
+      baseOptions:{ modelAssetPath: CFG.handModel, delegate }, runningMode:'VIDEO', numHands:2,
+      minHandDetectionConfidence:0.4, minHandPresenceConfidence:0.4, minTrackingConfidence:0.4 });
+    try { S.handLm = await make('GPU'); } catch (e) { console.warn('hand GPU failed', e); S.handLm = await make('CPU'); }
+    note('Precise hands on');
+  } catch (e) {
+    console.warn(e); S.precise = false; $('#precise').checked = false;
+    note('Precise hand model could not load — using standard tracking');
+  }
+  S.handLoading = false;
+}
 
 async function start(){
   const code = $('#code').value.trim();
@@ -163,6 +199,7 @@ async function start(){
       S.running = true;
       keepAwake();
       scheduleNext();
+      if ($('#precise').checked) setPrecise(true);
     }
     if (/^\d{4}$/.test(code)) connect(code);
     else setStatus('Tracking (enter the 4-digit TV code to connect)', 'warn');
@@ -241,6 +278,7 @@ function onTvMessage(msg){
   if (!msg || typeof msg !== 'object') return;
   if (msg.t === 'calibrate') startCalibration();
   if (msg.t === 'scene') sceneHint = msg.text || '';
+  if (msg.t === 'mode') S.fb = !!msg.fb;          // the TV asks for the full-body skeleton only when it needs it
   if (msg.t === 'pong') { const rtt = performance.now() - msg.ts; $('#lat').textContent = Math.round(rtt / 2 + 1000 / 30) + ' ms'; }
 }
 let sceneHint = '';
@@ -288,6 +326,10 @@ function tick(){
   // 4) Gestures
   detectGestures(body, sm, now);
 
+  // 4b) Optional precise finger model (every Nth frame); readings are matched to the nearest pose wrist
+  S.frameNo++;
+  if (S.precise && S.handLm && S.frameNo % CFG.handEvery === 0) preciseHands(raw, now, aspect);
+
   // 5) Hands → TV screen (0..1). Raw landmarks + a fast hand filter = less lag than filtering twice.
   const handsOut = [
     trackHand(0, raw[P.LWR], raw[P.LIDX], raw[P.LEL], body, dt, now),
@@ -298,17 +340,81 @@ function tick(){
   const sk = [];
   for (const p of sm) { const q = screenMap(p, body); sk.push(r3(q.x), r3(q.y), Math.round(p.v * 100) / 100); }
 
+  // 6) Exercise measurements (body-relative, in torso lengths) and, on request, the full-body skeleton
+  const ex = exFeatures(sm, body, dt);
+  let fb = null;
+  if (S.fb) {
+    fb = [];
+    const T = S.base ? S.base.torso : body.torso;
+    for (const i of FBJ) { const p = sm[i]; fb.push(r2((p.X - body.hip.X) / T), r2((p.Y - body.hip.Y) / T), r2(p.v)); }
+  }
+
   S.warn = body.hip.v < 0.4 ? 'Step back — I can’t see your hips' : '';
   setHint(S.warn || (S.calib ? 'Hold still in the middle…' : sceneHint));
-  finish(now, sm, { h, sk }, aspect, handsOut);
+  finish(now, sm, { h, sk, ex, fb }, aspect, handsOut);
+}
+
+const r2 = v => Math.round(v * 100) / 100;
+const FBJ = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];   // nose, shoulders, elbows, wrists, hips, knees, ankles
+
+// Everything the TV's exercise game needs, as 15 small numbers (see EX in tv.html):
+// 0-3 wrists relative to shoulders · 4-5 knee rise · 6-7 ankle rise · 8 feet apart (1 = together) · 9 lean
+// 10 sideways hip shift · 11 shoulder drop · 12 movement energy · 13 legs visible · 14 arms visible
+function exFeatures(sm, body, dt){
+  const B = S.base, T = B ? B.torso : body.torso, sh = body.sh, hip = body.hip;
+  const q = i => sm[i];
+  const ok = (i, v = 0.4) => sm[i].v > v;
+  const wl = [(q(15).X - sh.X) / T, (q(15).Y - sh.Y) / T], wr = [(q(16).X - sh.X) / T, (q(16).Y - sh.Y) / T];
+  const kneeL = (q(25).Y - hip.Y) / T, kneeR = (q(26).Y - hip.Y) / T, ankL = (q(27).Y - hip.Y) / T, ankR = (q(28).Y - hip.Y) / T;
+  const legsOk = B && B.legs;
+  const kuL = legsOk ? B.kneeL - kneeL : 0, kuR = legsOk ? B.kneeR - kneeR : 0;
+  const auL = legsOk ? B.ankL - ankL : 0, auR = legsOk ? B.ankR - ankR : 0;
+  const sep = Math.abs(q(28).X - q(27).X) / T, sepRatio = legsOk && B.sep > 0.15 ? sep / B.sep : 1;
+  const lean = (sh.X - hip.X) / T;
+  const x = hip.v > 0.4 ? hip.X : sh.X;
+  const hdx = B ? (x - B.hipX) / B.shW : 0;
+  const drop = B ? (sh.Y - B.shY) / B.torso : 0;
+  // movement energy: how fast the main joints are moving, averaged and smoothed
+  const KEY = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26];
+  let e = 0, n = 0;
+  if (S.prevKey) for (let j = 0; j < KEY.length; j++) {
+    const p = sm[KEY[j]], o = S.prevKey[j];
+    if (p.v > 0.4) { e += Math.hypot(p.X - o[0], p.Y - o[1]) / dt / T; n++; }
+  }
+  S.prevKey = KEY.map(i => [sm[i].X, sm[i].Y]);
+  if (n) S.mv += (e / n - S.mv) * 0.3;
+  const legs = (sm[25].v + sm[26].v + sm[27].v + sm[28].v) / 4;
+  const arms = (sm[13].v + sm[14].v + sm[15].v + sm[16].v) / 4;
+  return [r2(wl[0]), r2(wl[1]), r2(wr[0]), r2(wr[1]), r2(kuL), r2(kuR), r2(auL), r2(auR), r2(sepRatio), r2(lean), r2(hdx), r2(drop), r2(S.mv), r2(legs), r2(arms)];
+}
+
+// Run the finger model and give each hand to the nearest pose wrist
+function preciseHands(raw, now, aspect){
+  let res;
+  try { res = S.handLm.detectForVideo(video, now); } catch (e) { return; }
+  const hands = (res?.landmarks || []).map(h => {
+    const tip = h[8], knuckle = h[5], w = h[0];
+    return { pt:{ X:(1 - (tip.x * 0.75 + knuckle.x * 0.25)) * aspect, Y: tip.y * 0.75 + knuckle.y * 0.25 }, wr:{ X:(1 - w.x) * aspect, Y:w.y } };
+  });
+  const pairs = [];
+  hands.forEach((h, i) => [P.LWR, P.RWR].forEach((idx, k) => { const d = Math.hypot(raw[idx].X - h.wr.X, raw[idx].Y - h.wr.Y); if (d < CFG.handMatch) pairs.push({ d, i, k }); }));
+  pairs.sort((a, b) => a.d - b.d);
+  const usedH = new Set(), usedK = new Set();
+  for (const p of pairs) {
+    if (usedH.has(p.i) || usedK.has(p.k)) continue;
+    usedH.add(p.i); usedK.add(p.k);
+    S.hp[p.k] = { X:hands[p.i].pt.X, Y:hands[p.i].pt.Y, t:now };
+  }
 }
 
 function trackHand(k, wr, ix, el, body, dt, now){
   const H = S.hands[k];
-  const vis = Math.max(wr.v, ix.v * 0.9);
+  const pr = S.hp[k], precise = S.precise && now - pr.t < CFG.handFresh;
+  const vis = precise ? 0.95 : Math.max(wr.v, ix.v * 0.9);
   if (vis > 0.2) {
     let X = wr.X, Y = wr.Y;
-    if (ix.v > 0.25 && wr.v > 0.2) { X += (ix.X - wr.X) * CFG.handReach; Y += (ix.Y - wr.Y) * CFG.handReach; }
+    if (precise) { X = pr.X; Y = pr.Y; }
+    else if (ix.v > 0.25 && wr.v > 0.2) { X += (ix.X - wr.X) * CFG.handReach; Y += (ix.Y - wr.Y) * CFG.handReach; }
     else if (el.v > 0.2) { X += (wr.X - el.X) * 0.15; Y += (wr.Y - el.Y) * 0.15; }
     if (now - H.seen > CFG.handHoldMs) { H.fx.reset(); H.fy.reset(); }
     const s = screenMap({ X, Y }, body);
@@ -332,7 +438,9 @@ function measure(sm){
   const hip = mid(sm[P.LHIP], sm[P.RHIP]);
   const shW = Math.max(0.02, dist(sm[P.LSH], sm[P.RSH]));
   const torso = hip.v > 0.4 ? Math.max(0.05, dist(sh, hip)) : shW * 1.35;
-  return { sh, hip, shW, torso, nose: sm[P.NOSE] };
+  return { sh, hip, shW, torso, nose: sm[P.NOSE],
+    kneeL:(sm[25].Y - hip.Y) / torso, kneeR:(sm[26].Y - hip.Y) / torso, ankL:(sm[27].Y - hip.Y) / torso, ankR:(sm[28].Y - hip.Y) / torso,
+    sep:Math.abs(sm[28].X - sm[27].X) / torso, lv:Math.min(sm[25].v, sm[26].v, sm[27].v, sm[28].v) };
 }
 
 function screenMap(p, body){
@@ -372,6 +480,8 @@ function runCalibration(now, body){
     hipY: avg(b => b.hip.Y),
     shW:  avg(b => b.shW),
     torso:avg(b => b.torso),
+    legs: avg(b => b.lv) > 0.45,          // knees and feet were in view → leg exercises can be detected
+    kneeL:avg(b => b.kneeL), kneeR:avg(b => b.kneeR), ankL:avg(b => b.ankL), ankR:avg(b => b.ankR), sep:avg(b => b.sep),
   };
   S.calib = null;
   S.g.lane = 0;
@@ -422,7 +532,7 @@ function maybeSend(now, data){
   S.lastSend = now;
   const msg = { t:'f', ts: Math.round(now * 10) / 10, present: !!data, warn: S.warn,
     g: { lane:S.g.lane, jump:S.g.jump, duck:S.g.duck, up:S.g.up, cal: !!S.base } };
-  if (data) { msg.h = data.h; msg.sk = data.sk; }
+  if (data) { msg.h = data.h; msg.sk = data.sk; msg.ex = data.ex; if (data.fb) msg.fb = data.fb; }
   send(msg);
 }
 
