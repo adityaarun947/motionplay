@@ -313,7 +313,7 @@ function openPeer(){
       if (tracker && tracker !== conn) { try { tracker.close(); } catch {} }
       tracker = conn; I.connected = true; I.everConnected = true;
       hideLobby(); toast('Tablet connected! Hold a hand over a game to start.');
-      sendTracker({ t:'scene', text: scene.hint || '' });
+      sendTracker({ t:'scene', text: scene.hint || '' }); sendTracker({ t:'mode', players: scene.players || 1 });
     });
     conn.on('data', m => {
       if (!m || typeof m !== 'object') return;
@@ -338,6 +338,7 @@ function openPeer(){
     }
   });
 }
+setInterval(() => sendTracker({ t:'mode', players: (scene && scene.players) || 1 }), 2000);   // keeps the tablet in the right 1 / 2-player mode even if a message is lost
 function sendTracker(m){ if (tracker && tracker.open) { try { tracker.send(m); } catch {} } }
 
 function hideLobby(){ document.getElementById('lobby').style.display = 'none'; }

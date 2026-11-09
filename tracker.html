@@ -207,7 +207,7 @@ async function start(){
       setStatus('Starting camera…');
       await startCamera();
       setStatus('Loading motion model…');
-      S.landmarker = await createLandmarker($('#accurate').checked);
+      S.landmarker = await createLandmarker($('#accurate').checked, S.players); S.lmPlayers = S.players;
       S.running = true;
       keepAwake();
       scheduleNext();
@@ -234,12 +234,12 @@ async function startCamera(){
   await video.play();
 }
 
-async function createLandmarker(accurate){
+async function createLandmarker(accurate, n = 1){
   const fileset = await FilesetResolver.forVisionTasks(CFG.wasm);
   const opts = delegate => ({
     baseOptions:{ modelAssetPath: accurate ? CFG.modelFull : CFG.modelLite, delegate },
-    runningMode:'VIDEO', numPoses:1,
-    minPoseDetectionConfidence:0.5, minPosePresenceConfidence:0.5, minTrackingConfidence:0.5,
+    runningMode:'VIDEO', numPoses:n,
+    minPoseDetectionConfidence: n > 1 ? 0.35 : 0.5, minPosePresenceConfidence: n > 1 ? 0.35 : 0.5, minTrackingConfidence: n > 1 ? 0.4 : 0.5,
   });
   try { return await PoseLandmarker.createFromOptions(fileset, opts('GPU')); }
   catch (e) { console.warn('GPU delegate failed, using CPU', e); return await PoseLandmarker.createFromOptions(fileset, opts('CPU')); }
@@ -275,7 +275,7 @@ function dial(){
     send({ t:'hello', role:'tracker', calibrated: !!Q.base });
   });
   conn.on('data', onTvMessage);
-  conn.on('close', () => { if (S.conn === conn) { S.conn = null; setStatus('TV disconnected — retrying…', 'warn'); scheduleRetry(); } });
+  conn.on('close', () => { if (S.conn === conn) { S.conn = null; setPlayers(1); setStatus('TV disconnected — retrying…', 'warn'); scheduleRetry(); } });
   conn.on('error', e => console.warn('conn error', e));
 }
 
@@ -304,6 +304,7 @@ function scheduleNext(){ if (hasRVFC) video.requestVideoFrameCallback(() => tick
 function tick(){
   if (!S.running) return;
   scheduleNext();
+  if (!S.landmarker) return;   // being rebuilt for 1 / 2 players
   if (video.readyState < 2 || video.currentTime === S.lastVideoTime) return;
   S.lastVideoTime = video.currentTime;
 
@@ -341,11 +342,27 @@ function assignPoses(poses){
   return out;
 }
 
+// Switching between 1 and 2 people: build a fresh model with the right numPoses (more reliable than changing it live)
+async function rebuildLandmarker(){
+  if (!S.running) return;                                  // not started yet: start() builds it with S.players
+  if (S.rebuilding) { S.rebuildAgain = true; return; }
+  S.rebuilding = true;
+  try {
+    do {
+      S.rebuildAgain = false;
+      const want = S.players, old = S.landmarker;
+      const lm = await createLandmarker($('#accurate').checked, want);
+      S.landmarker = lm; S.lmPlayers = want;
+      try { old && old.close(); } catch {}
+    } while (S.rebuildAgain || S.lmPlayers !== S.players);
+  } catch (e) { console.warn('rebuild', e); note('Could not switch player mode'); }
+  S.rebuilding = false;
+}
 function setPlayers(n){
   n = n === 2 ? 2 : 1;
-  if (n === S.players) return;
+  if (n === S.players) { if (S.running && S.lmPlayers !== n && !S.rebuilding) rebuildLandmarker(); return; }   // (also retries a switch that failed)
   S.players = n;
-  try { S.landmarker && S.landmarker.setOptions({ numPoses:n }); } catch (e) { console.warn('numPoses', e); }
+  rebuildLandmarker();
   for (const p of PL) { p.lastX = null; p.present = false; p.size = null; for (const f of p.bodyF) { f[0].reset(); f[1].reset(); } }
   if (S.precise && n === 2) note('Two-player mode: precise hands paused');
   else if (S.precise) note('Precise hands on');
