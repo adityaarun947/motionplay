@@ -39,7 +39,7 @@
       <p id="lobbyStatus">Waiting for the tablet…</p>
       <button class="btn" id="kbBtn">Play with keyboard / mouse</button>
       <button class="btn" id="fsBtn">Full screen</button>
-      <p class="keys">Keys: ← → lanes · ↑ jump · ↓ duck · Z dash (penguin) · mouse = blade / aim · G grenade · 1–6 pick game · C customize runner · N music on/off · P pause · M menu · F full screen</p>
+      <p class="keys">Keys: ← → lanes · ↑ jump · ↓ duck · Z dash (penguin) · mouse = blade / aim · G grenade · 1–7 pick game · C customize runner · N music on/off · P pause · M menu · F full screen</p>
     </div>
     <div id="qr">QR</div>
   </div>
@@ -255,6 +255,7 @@ window.addEventListener('keydown', e => {
   if (k === '4') { hideLobby(); go('fithub'); }
   if (k === '5') { hideLobby(); launch('shape'); }
   if (k === '6') { hideLobby(); launch('penguin'); }
+  if (k === '7') { hideLobby(); go('balloon'); }
   if (k === 'n' || k === 'N') { if (!(scene.keys && scene === scenes.fit)) Music.toggle(); }
   if (k === 'c' || k === 'C') { if (scene === scenes.menu || scene === scenes.over) go('locker'); }
   if (scene.keys) scene.keys(k);
@@ -589,6 +590,14 @@ const TRACKS = {
     lead:melody('0:84:2 2:88:2 4:91:3 8:88:2 10:84:2 12:86:4 16:84:2 18:81:2 20:84:3 24:86:2 26:88:2 28:84:4 32:79:2 34:84:2 36:88:3 40:86:2 42:83:2 44:79:4 48:81:2 50:84:2 52:88:3 56:86:2 58:84:2 60:83:4'),
     leadV:{ type:'triangle', vol:0.075, cut:3200, dur:0.16 },
     drums:{ k:'x...x...x...x...', s:'....x.......x...', h:'x.x.x.x.x.x.x.xx', soft:0.6 }, lv:{ drums:0, lead:0.2 } },
+  // happy, poppy, fast — Balloon Burst
+  balloon:{ bpm:128, prog:[[62,66,69],[59,62,66],[55,59,62],[57,61,64]], roots:[50,47,43,45],
+    bass:[0,R,R,0,R,12,R,0,R,R,0,R,12,R,7,R], bassV:{ type:'triangle', vol:0.12, dur:0.16, cut:850 },
+    arp:[0,1,2,1,0,1,2,3,0,1,2,1,2,3,2,1], arpV:{ type:'square', vol:0.026, dur:0.08, cut:2800 },
+    pad:{ type:'triangle', vol:0.03, att:0.25, cut:950 },
+    lead:melody('0:86:2 2:90:2 4:93:2 6:90:2 8:86:3 12:90:3 16:88:2 18:91:2 20:95:2 22:91:2 24:88:3 28:86:3 32:83:2 34:86:2 36:90:2 38:86:2 40:83:3 44:81:3 48:85:2 50:88:2 52:92:2 54:88:2 56:85:3 60:81:3'),
+    leadV:{ type:'triangle', vol:0.075, cut:3300, dur:0.14 },
+    drums:{ k:'x...x...x...x...', s:'....x.......x.x.', h:'xxxxxxxxxxxxxxxx', soft:0.55 }, lv:{ drums:0, lead:0.2 } },
   fitsenior:{ bpm:80, prog:[[53,57,60],[53,58,62],[55,60,64],[53,57,60]], roots:[29,34,36,29],
     bass:[0,R,R,R,R,R,R,R,0,R,R,R,7,R,R,R], bassV:{ type:'sine', vol:0.12, dur:0.6, cut:500 },
     arp:[0,R,1,R,2,R,1,R,0,R,1,R,2,R,1,R], arpV:{ type:'sine', vol:0.065, dur:0.35, cut:2400 },
@@ -699,7 +708,7 @@ scenes.menu = {
   hint:'Hold a hand over a game on the TV to start it',
   enter(){
     this.focus = 0;
-    const card = i => () => { const w = Math.min(W * 0.145, H * 0.36), h = w * 1.3, gap = W * 0.016, tot = 6 * w + 5 * gap; return [W / 2 - tot / 2 + i * (w + gap), H * 0.27, w, h]; };
+    const card = i => () => { const w = Math.min(W * 0.116, H * 0.33), h = w * 1.3, gap = W * 0.013, tot = 7 * w + 6 * gap; return [W / 2 - tot / 2 + i * (w + gap), H * 0.27, w, h]; };
     this.buttons = [
       HoverButton('Fruit Slash', 'Swipe to slice', card(0), () => go('fruit'), '#ff6b5a', { draw:drawFruitIcon, best:'fruit' }),
       HoverButton('Lane Runner', 'Step · jump · 1–2 players', card(1), () => launch('runner'), '#4fd27a', { draw:drawRunnerIcon, best:'runner' }),
@@ -707,12 +716,13 @@ scenes.menu = {
       HoverButton('Fit Zone', 'Guided workouts', card(3), () => go('fithub'), '#3ee0c0', { draw:drawFitIcon }),
       HoverButton('Shape Fit', 'Fit the hole · 1–2 players', card(4), () => launch('shape'), '#ff8a3d', { draw:drawShapeIcon, best:'shape' }),
       HoverButton('Penguin Slide', 'Slip · jump · dash · 1–2 players', card(5), () => launch('penguin'), '#4db8ff', { draw:drawPenguinIcon, best:'penguin' }),
+      HoverButton('Balloon Burst', 'Reach & pop', card(6), () => go('balloon'), '#ff5a8a', { draw:drawBalloonIcon, best:'balloon' }),
       HoverButton('Customize & shop', '', () => [W / 2 - Math.min(W * 0.2, H * 0.36) / 2, H * 0.87, Math.min(W * 0.2, H * 0.36), H * 0.07], () => go('locker'), '#ffb36b'),
     ];
   },
   keys(k){
     if (k === 'ArrowLeft') this.focus = Math.max(0, this.focus - 1);
-    if (k === 'ArrowRight') this.focus = Math.min(5, this.focus + 1);
+    if (k === 'ArrowRight') this.focus = Math.min(6, this.focus + 1);
     if (k === 'Enter') { SFX.select(); this.buttons[this.focus].action(); }
   },
   update(dt){ this.buttons.forEach((b, i) => b.focus = I.kb.active && i === this.focus); updateButtons(this.buttons, dt, sceneT); },
@@ -725,7 +735,7 @@ scenes.menu = {
     drawGhost(0.16);
     text('MotionPlay', W / 2, H * 0.11, H * 0.09, '#fff');
     text(motionLive() ? 'Hold a hand over a game to start' : 'Use ← → and Enter, or click a game', W / 2, H * 0.2, H * 0.035, '#c9d2ff', 'center', 600);
-    text('MotionPlay v5 · 5 games · 2-player', 20, H * 0.975, H * 0.022, '#9aa6d8', 'left', 600);
+    text('MotionPlay v7 · 7 games · 2-player', 20, H * 0.975, H * 0.022, '#9aa6d8', 'left', 600);
     if (Music.muted) text('♪ music off', W - 20, H * 0.03, H * 0.022, '#9aa6d8', 'right', 600);
     text(`● ${WALLET.coins} coins`, W - 20, H * 0.975, H * 0.026, '#ffd23f', 'right', 800);
     drawButtons(this.buttons);
@@ -748,6 +758,15 @@ function drawPenguinIcon(x, y, w, h){
   ctx.fillStyle = '#262c42'; ctx.beginPath(); ctx.ellipse(0, -s * 0.28, s * 0.3, s * 0.3, 0, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.arc(0, -s * 0.62, s * 0.17, 0, TAU); ctx.fill();
   ctx.fillStyle = '#ff4f6d'; roundRect(-s * 0.19, -s * 0.5, s * 0.38, s * 0.09, s * 0.04); ctx.fill();
   ctx.restore();
+}
+function drawBalloonIcon(x, y, w, h){
+  const cx = x + w / 2, cy = y + h * 0.4;
+  for (const [dx, dy, r, c] of [[-0.2, 0.06, 0.17, '#ff5a6e'], [0.2, 0.02, 0.15, '#4db8ff'], [0, -0.06 + Math.sin(sceneT * 2) * 0.02, 0.19, '#ffc800']]) {
+    const bx = cx + dx * w, by = cy + dy * h, rr = r * w;
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx, by + rr * 1.1); ctx.quadraticCurveTo(bx + 8, by + rr * 1.8, cx, y + h * 0.78); ctx.stroke();
+    ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(bx, by, rr, rr * 1.12, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.ellipse(bx - rr * 0.35, by - rr * 0.4, rr * 0.15, rr * 0.28, -0.5, 0, TAU); ctx.fill();
+  }
 }
 function drawFitIcon(x, y, w, h){ drawCoach(x + w / 2, y + h * 0.66, h * 0.5, coachPose('jacks', sceneT, false), COACH_STYLE.kids); }
 function drawZombieIcon(x, y, w, h){
@@ -2134,6 +2153,182 @@ scenes.penguin = {
     // beak tip peeking either side + cap bobble
     ctx.fillStyle = '#ff9a1f'; ctx.beginPath(); ctx.moveTo(-s * 0.04, -s * 0.76); ctx.lineTo(0, -s * 0.8); ctx.lineTo(s * 0.04, -s * 0.76); ctx.fill();
     ctx.restore(); ctx.globalAlpha = 1;
+  },
+};
+/* =====================================================================
+   BALLOON BURST — balloons float up from the bottom. Reach up and pop them with either hand.
+   Normal = points · Golden = lots of points · Spiky = costs a life.
+   It gets faster over time, then the wind starts blowing the balloons sideways.
+   Pop lots of balloons in a quick chain to earn coins.
+   ===================================================================== */
+const BCOLORS = ['#ff5a6e', '#ffb02e', '#4fd27a', '#4db8ff', '#b46bff', '#ff7ad9'];
+const BSKY = [
+  { name:'Sunny Sky',   top:'#6cc6ff', bot:'#dff4ff' },
+  { name:'Sunset Drift',top:'#ff8a5b', bot:'#ffe0b0' },
+  { name:'Starry Night',top:'#141a4d', bot:'#5a4aa8', stars:true },
+];
+const mixHex = (hex, to, k) => { const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; return `rgb(${Math.round(r + (to - r) * k)},${Math.round(g + (to - g) * k)},${Math.round(b + (to - b) * k)})`; };
+const lighten = (hex, k) => mixHex(hex, 255, k), shade = (hex, k) => mixHex(hex, 0, 1 - k);
+const CHAIN_WINDOW = 1.4;       // seconds you have to pop the next balloon to keep the chain alive
+
+scenes.balloon = {
+  game:true, music:'balloon', hint:'Reach up and pop balloons with either hand · avoid the spiky ones!',
+  enter(){
+    Object.assign(this, { balloons:[], parts:[], pops:[], clouds:[], score:0, lives:3, t:0, spawnT:0.6, state:'ready', readyT:2.6, chain:0, bestChain:0, chainT:0, popped:0, golds:0,
+      shake:0, flash:0, flashCol:'255,255,255', inv:0, wind:0, windT:0, windMsg:false, coinN:0, best:+store.get('mp-best-balloon', 0), sky:0, banner:{ text:BSKY[0].name, t:0 }, banked:false });
+    for (let i = 0; i < 7; i++) this.clouds.push({ x:rand(0, 1), y:rand(0.05, 0.6), s:rand(0.6, 1.5), v:rand(0.004, 0.012) });
+    Music.setLevel(0.5);
+  },
+  exit(){ Music.setLevel(1); if (!this.banked) { this.banked = true; /* coins were paid straight into the wallet as they were earned */ } },
+  mult(){ return 1 + Math.min(3, Math.floor(this.chain / 10)); },
+  spawn(){
+    const t = this.t, r = Math.random(), pSpike = Math.min(0.3, 0.1 + t * 0.0018), pGold = 0.07;
+    const type = r < pSpike ? 'spike' : r > 1 - pGold ? 'gold' : 'normal';
+    const rad = H * (type === 'gold' ? 0.062 : type === 'spike' ? 0.078 : rand(0.07, 0.092));
+    const up = H * (0.2 + Math.min(0.32, t * 0.0026)) * (type === 'gold' ? 1.35 : 1) * rand(0.85, 1.2);
+    this.balloons.push({ type, x:rand(rad, W - rad), y:H + rad * 1.6, vx:0, up, rad, col:pick(BCOLORS), ph:rand(0, TAU), sway:rand(0.5, 1.2) });
+  },
+  burstAt(b, big){
+    const cols = b.type === 'gold' ? ['#ffe14a', '#fff6b0', '#ffb800', '#fff'] : b.type === 'spike' ? ['#ff3b3b', '#ffb0b0', '#fff'] : [b.col, '#fff', b.col];
+    burst(this.parts, b.x, b.y, big ? 30 : 18, cols, H * 0.9, H * 0.011, 0.8, 0.7);
+  },
+  update(dt){
+    this.parts = stepParts(this.parts, dt); this.pops = stepPops(this.pops, dt);
+    this.banner.t += dt; this.shake = Math.max(0, this.shake - dt * 3); this.flash = Math.max(0, this.flash - dt * 2.5); this.inv = Math.max(0, this.inv - dt);
+    for (const c of this.clouds) { c.x += c.v * dt; if (c.x > 1.2) { c.x = -0.2; c.y = rand(0.05, 0.6); } }
+    if (this.state === 'ready') { const p = this.readyT; this.readyT -= dt; countBeep(p, this.readyT); if (this.readyT <= 0) { this.state = 'play'; SFX.go(); } return; }
+    this.t += dt;
+    const sk = Math.floor(this.t / 60) % BSKY.length;
+    if (sk !== this.sky) { this.sky = sk; this.banner = { text:BSKY[sk].name, t:0 }; SFX.swoosh(); }
+    Music.setLevel(clamp(0.4 + this.t / 120, 0, 1));
+    if (!this.vs) Music.setTempo(0.95 + Math.min(0.25, this.t / 400));
+
+    // wind starts after ~25 s and slowly gets stronger: gentle gusts that push balloons sideways
+    const amp = this.t < 25 ? 0 : Math.min(1, (this.t - 25) / 110);
+    this.windT += dt;
+    const target = amp * Math.sin(this.windT * 0.45) * (0.6 + 0.4 * Math.sin(this.windT * 1.3));
+    this.wind += (target - this.wind) * Math.min(1, dt * 1.5);
+    if (amp > 0 && !this.windMsg) { this.windMsg = true; pop(this.pops, W / 2, H * 0.3, 'The wind is picking up!', '#fff', 0.055, 2); SFX.swoosh(); }
+
+    // chain timeout
+    if (this.chain > 0) { this.chainT -= dt; if (this.chainT <= 0) { if (this.chain >= 5) pop(this.pops, W / 2, H * 0.4, `Chain ${this.chain} ended`, '#e8f4ff', 0.035, 1); this.chain = 0; } }
+
+    // spawn: quicker and quicker, often in little groups
+    this.spawnT -= dt;
+    if (this.spawnT <= 0) {
+      const n = 1 + (Math.random() < Math.min(0.5, this.t / 150) ? 1 : 0) + (Math.random() < Math.min(0.3, this.t / 250) ? 1 : 0);
+      for (let i = 0; i < n; i++) this.spawn();
+      this.spawnT = Math.max(0.3, 1.05 - this.t * 0.0075) + n * 0.12;
+    }
+
+    // popping: the hand (or the path it just swept) touches a balloon
+    const pts = cursors().map(c => ({ x:c.x, y:c.y }));
+    const segs = I.segments.filter(s => s.speed >= 0);
+    const reach = H * 0.03;
+    for (const b of this.balloons) {
+      if (b.dead) continue;
+      b.ph += dt * b.sway * 2.2;
+      b.vx += (this.wind * H * 0.5 - b.vx) * Math.min(1, dt * 1.2);
+      b.x += (b.vx + Math.sin(b.ph) * H * 0.03) * dt; b.y -= b.up * dt;
+      if (b.x < b.rad) { b.x = b.rad; b.vx = Math.abs(b.vx) * 0.5; } if (b.x > W - b.rad) { b.x = W - b.rad; b.vx = -Math.abs(b.vx) * 0.5; }
+      let hit = pts.some(p => Math.hypot(p.x - b.x, (p.y - b.y) * 0.9) < b.rad * 1.05 + reach);
+      if (!hit) for (const s of segs) { const dx = s.x2 - s.x1, dy = s.y2 - s.y1, l2 = dx * dx + dy * dy || 1, u = clamp(((b.x - s.x1) * dx + (b.y - s.y1) * dy) / l2, 0, 1); if (Math.hypot(s.x1 + dx * u - b.x, (s.y1 + dy * u - b.y) * 0.9) < b.rad * 1.0 + reach) { hit = true; break; } }
+      if (hit) this.hitBalloon(b);
+    }
+    this.balloons = this.balloons.filter(b => !b.dead && b.y > -b.rad * 3);
+
+    if (this.lives <= 0) go('over', { game:'balloon', score:this.score, detail:`${this.popped} balloons · best chain ${this.bestChain} · ${this.golds} golden`, coins:this.coinN });
+  },
+  hitBalloon(b){
+    b.dead = true;
+    if (b.type === 'spike') {
+      this.burstAt(b, true);
+      if (this.inv > 0) return;
+      this.lives--; this.inv = 1.2; this.shake = 1; this.flash = 0.5; this.flashCol = '255,60,60'; this.chain = 0; SFX.hit();
+      pop(this.pops, b.x, b.y, 'Ouch!  -1 ♥', '#ff5a5a', 0.06, 1.1);
+      return;
+    }
+    const gold = b.type === 'gold', m = this.mult(), pts = (gold ? 50 : 10) * m;
+    this.score += pts; this.popped++; if (gold) this.golds++;
+    this.chain++; this.chainT = CHAIN_WINDOW; this.bestChain = Math.max(this.bestChain, this.chain);
+    this.burstAt(b, gold);
+    tone(gold ? 1500 : 700 + Math.min(this.chain, 14) * 55, 0.09, gold ? 'triangle' : 'square', 0.06);
+    if (gold) { SFX.fanfare(); this.flash = 0.3; this.flashCol = '255,225,90'; }
+    pop(this.pops, b.x, b.y, `+${pts}`, gold ? '#ffe14a' : '#fff', gold ? 0.06 : 0.04, 0.8);
+    // quick-chain coins: every 10 balloons popped in a row (each within ~1.4 s of the last) pays 1, 2, 3... coins
+    if (this.chain > 0 && this.chain % 10 === 0) {
+      const c = Math.min(5, this.chain / 10);
+      this.coinN += earnCoins(c); SFX.heart();
+      pop(this.pops, W / 2, H * 0.3, `CHAIN ${this.chain}!  +${c} coin${c > 1 ? 's' : ''}`, '#ffd23f', 0.07, 1.6);
+      for (let i = 0; i < 3; i++) burst(this.parts, W * rand(0.2, 0.8), H * rand(0.15, 0.4), 14, ['#ffd23f', '#fff6b0', '#fff'], H * 0.7, H * 0.009, 1, 0.7);
+    }
+  },
+  rescale(sc){ for (const arr of [this.parts, this.pops, this.balloons]) for (const o of arr) sc(o, true); },
+
+  draw(now){
+    const S = BSKY[this.sky];
+    ctx.save();
+    if (this.shake > 0) ctx.translate(rand(-1, 1) * this.shake * H * 0.012, rand(-1, 1) * this.shake * H * 0.012);
+    ctx.drawImage(cachedLayer('bb' + this.sky, g => {
+      const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, S.top); gr.addColorStop(1, S.bot); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+      if (S.stars) { g.fillStyle = '#fff'; for (let n = 0; n < 80; n++) { g.globalAlpha = rand(0.3, 1); g.beginPath(); g.arc(rand(0, W), rand(0, H * 0.7), rand(1, 2.2), 0, TAU); g.fill(); } g.globalAlpha = 1; }
+    }), 0, 0);
+    for (const c of this.clouds) { const x = c.x * W, y = c.y * H, r = H * 0.05 * c.s; ctx.fillStyle = this.sky === 2 ? 'rgba(180,170,255,0.18)' : 'rgba(255,255,255,0.7)'; for (const [dx, dy, k] of [[0, 0, 1], [0.9, 0.1, 0.8], [-0.9, 0.12, 0.75], [0.35, -0.35, 0.7]]) { ctx.beginPath(); ctx.arc(x + dx * r, y + dy * r, r * k, 0, TAU); ctx.fill(); } }
+    // wind streaks
+    if (Math.abs(this.wind) > 0.08) {
+      ctx.strokeStyle = this.sky === 2 ? 'rgba(220,220,255,0.25)' : 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+      for (let i = 0; i < 12; i++) { const y = (i * 0.083 + 0.03) * H, x = ((i * 211 + sceneT * 600 * this.wind) % (W + 200) + W + 200) % (W + 200) - 100, l = Math.abs(this.wind) * W * 0.12; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.sign(this.wind) * l, y + 2); ctx.stroke(); }
+    }
+    for (const b of this.balloons) this.drawBalloon(b);
+    drawParts(this.parts); drawPops(this.pops);
+    ctx.restore();
+    if (this.flash > 0) { ctx.fillStyle = `rgba(${this.flashCol},${this.flash * 0.4})`; ctx.fillRect(0, 0, W, H); }
+    this.drawHud();
+    if (this.state === 'ready') {
+      const n = Math.ceil(this.readyT);
+      text(n > 0 && this.readyT < 2.5 ? String(n) : 'Get ready!', W / 2, H * 0.45, H * 0.2, '#fff');
+      text('Pop the balloons with your hands · avoid the spiky ones', W / 2, H * 0.6, H * 0.03, '#fff', 'center', 700);
+    }
+  },
+  drawBalloon(b){
+    const r = b.rad, sw = Math.sin(b.ph) * r * 0.08;
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(clamp(b.vx / (H * 1.5), -0.25, 0.25));
+    // string
+    ctx.strokeStyle = b.type === 'spike' ? 'rgba(60,40,60,0.7)' : 'rgba(80,80,100,0.6)'; ctx.lineWidth = Math.max(1.5, r * 0.04);
+    ctx.beginPath(); ctx.moveTo(0, r * 1.2); ctx.bezierCurveTo(sw * 3, r * 1.7, -sw * 3, r * 2.1, sw, r * 2.6); ctx.stroke();
+    if (b.type === 'gold') { const gl = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 2.2); gl.addColorStop(0, 'rgba(255,225,90,0.5)'); gl.addColorStop(1, 'rgba(255,225,90,0)'); ctx.fillStyle = gl; ctx.fillRect(-r * 2.2, -r * 2.2, r * 4.4, r * 4.4); }
+    if (b.type === 'spike') {      // spikes first, so the body sits on top
+      ctx.fillStyle = '#3a1630'; const n = 12;
+      for (let i = 0; i < n; i++) { const a = i / n * TAU + Math.sin(sceneT * 2) * 0.05; ctx.beginPath(); ctx.moveTo(Math.cos(a - 0.17) * r * 1.0, Math.sin(a - 0.17) * r * 1.1); ctx.lineTo(Math.cos(a) * r * 1.45, Math.sin(a) * r * 1.55); ctx.lineTo(Math.cos(a + 0.17) * r * 1.0, Math.sin(a + 0.17) * r * 1.1); ctx.closePath(); ctx.fill(); }
+    }
+    const bc = b.type === 'gold' ? ['#fff3a0', '#ffc800', '#c98a00'] : b.type === 'spike' ? ['#c04a6a', '#7a1f4a', '#3a1630'] : [lighten(b.col, 0.5), b.col, shade(b.col, 0.7)];
+    const gr = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r * 1.15); gr.addColorStop(0, bc[0]); gr.addColorStop(0.55, bc[1]); gr.addColorStop(1, bc[2]);
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.ellipse(0, 0, r, r * 1.12, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = bc[2]; ctx.beginPath(); ctx.moveTo(-r * 0.12, r * 1.1); ctx.lineTo(r * 0.12, r * 1.1); ctx.lineTo(0, r * 1.25); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.ellipse(-r * 0.38, -r * 0.45, r * 0.16, r * 0.3, -0.5, 0, TAU); ctx.fill();
+    if (b.type === 'spike') {      // angry face
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = r * 0.07; ctx.beginPath(); ctx.moveTo(-r * 0.5, -r * 0.3); ctx.lineTo(-r * 0.12, -r * 0.1); ctx.moveTo(r * 0.5, -r * 0.3); ctx.lineTo(r * 0.12, -r * 0.1); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-r * 0.3, 0.02 * r, r * 0.08, 0, TAU); ctx.arc(r * 0.3, 0.02 * r, r * 0.08, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-r * 0.35, r * 0.5); for (let i = 0; i <= 6; i++) ctx.lineTo(-r * 0.35 + i * r * 0.117, r * (0.5 + (i % 2 ? 0.1 : -0.02))); ctx.stroke();
+    }
+    if (b.type === 'gold') { ctx.fillStyle = '#fff'; const tw = 0.6 + 0.4 * Math.sin(sceneT * 8 + b.ph); ctx.globalAlpha = tw; ctx.beginPath(); for (let i = 0; i < 8; i++) { const a = i / 8 * TAU, rr = i % 2 ? r * 0.12 : r * 0.3; ctx.lineTo(r * 0.35 + Math.cos(a) * rr * 0.6, -r * 0.35 + Math.sin(a) * rr * 0.6); } ctx.fill(); ctx.globalAlpha = 1; text('★', 0, r * 0.05, r * 0.7, '#fff6c8'); }
+    ctx.restore();
+  },
+  drawHud(){
+    const fk = Math.min(1, W / (H * 1.3));
+    text(String(this.score), W * 0.04, H * 0.085, H * 0.075 * fk, '#fff', 'left');
+    text(`Best ${this.best}`, W * 0.04, H * 0.14, H * 0.03 * fk, 'rgba(255,255,255,0.85)', 'left', 600);
+    text(`● ${this.coinN} coins`, W * 0.04, H * 0.185, H * 0.032 * fk, '#ffd23f', 'left', 800);
+    for (let i = 0; i < 3; i++) text('♥', W * (0.86 + i * 0.045), H * 0.07, H * 0.06 * fk, i < this.lives ? '#ff3b6b' : 'rgba(255,255,255,0.4)');
+    if (this.chain >= 2) {
+      const k = clamp(this.chainT / CHAIN_WINDOW, 0, 1), bw = Math.min(W * 0.25, H * 0.5);
+      text(`Chain ${this.chain}  ×${this.mult()}`, W / 2, H * 0.085, H * 0.055 * fk, this.mult() > 1 ? '#ffe14a' : '#fff');
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; roundRect(W / 2 - bw / 2, H * 0.105, bw, H * 0.014, H * 0.007); ctx.fill();
+      ctx.fillStyle = k > 0.35 ? '#7fe6ff' : '#ff8a5b'; roundRect(W / 2 - bw / 2, H * 0.105, Math.max(H * 0.014, bw * k), H * 0.014, H * 0.007); ctx.fill();
+      const nx = (Math.floor(this.chain / 10) + 1) * 10; text(`coins at ${nx}`, W / 2, H * 0.145, H * 0.022 * fk, 'rgba(255,255,255,0.85)', 'center', 600);
+    }
+    if (Math.abs(this.wind) > 0.12) text(`${this.wind > 0 ? '→' : '←'} wind`, W / 2, H * 0.95, H * 0.035 * fk, 'rgba(255,255,255,0.85)', 'center', 700);
+    if (this.banner.t < 2.4) { ctx.globalAlpha = Math.min(1, (2.4 - this.banner.t) * 2); text(this.banner.text, W / 2, H * 0.3, H * 0.06 * fk, '#fff'); ctx.globalAlpha = 1; }
   },
 };
 /* =====================================================================
