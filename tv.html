@@ -39,7 +39,7 @@
       <p id="lobbyStatus">Waiting for the tablet…</p>
       <button class="btn" id="kbBtn">Play with keyboard / mouse</button>
       <button class="btn" id="fsBtn">Full screen</button>
-      <p class="keys">Keys: ← → lanes · ↑ jump · ↓ duck · mouse = blade / aim · G grenade · 1/2/3/4 pick game · C customize runner · N music on/off · P pause · M menu · F full screen</p>
+      <p class="keys">Keys: ← → lanes · ↑ jump · ↓ duck · Z dash (penguin) · mouse = blade / aim · G grenade · 1–6 pick game · C customize runner · N music on/off · P pause · M menu · F full screen</p>
     </div>
     <div id="qr">QR</div>
   </div>
@@ -171,6 +171,7 @@ function onTrackerFrame(m){
   const now = performance.now();
   I.lastFrame = now;
   applyFrame(I, m, m.ts, now, true);
+  I.seen = m.seen | 0; I.np = m.np | 0;
   if (m.p2) applyFrame(I2, m.p2, m.ts, now, false); else I2.present = false;
 }
 // Copy one player's data from a tracker message into their input state (P = I for player 1, I2 for player 2)
@@ -253,6 +254,7 @@ window.addEventListener('keydown', e => {
   if (k === '3') { hideLobby(); launch('zombie'); }
   if (k === '4') { hideLobby(); go('fithub'); }
   if (k === '5') { hideLobby(); launch('shape'); }
+  if (k === '6') { hideLobby(); launch('penguin'); }
   if (k === 'n' || k === 'N') { if (!(scene.keys && scene === scenes.fit)) Music.toggle(); }
   if (k === 'c' || k === 'C') { if (scene === scenes.menu || scene === scenes.over) go('locker'); }
   if (scene.keys) scene.keys(k);
@@ -477,7 +479,7 @@ function go(name, data){
   sendTracker({ t:'scene', text: s.hint || '' });
 }
 // Lane Runner, Zombie Siege and Shape Fit ask "1 or 2 players?" first
-const TWO_P = { runner:1, zombie:1, shape:1 };
+const TWO_P = { runner:1, zombie:1, shape:1, penguin:1 };
 function launch(name){ if (TWO_P[name]) go('players', { game:name }); else go(name); }
 function awayNow(){
   if (scene === scenes.versus && scene.state === 'play') return I.everConnected && !I.kb.active && (!motionLive() || !I.present || !I2.present);
@@ -579,6 +581,14 @@ const TRACKS = {
     lead:melody('0:81:2 4:84:2 6:88:2 8:86:4 14:84:2 16:83:2 20:86:2 22:91:2 24:88:4 30:86:2 32:84:2 36:81:2 38:84:2 40:88:4 46:86:2 48:83:3 52:79:3 56:81:6'),
     leadV:{ type:'triangle', vol:0.07, cut:3000, dur:0.18 },
     drums:{ k:'x.....x.x.....x.', s:'....x.......x...', h:'x.x.x.x.x.x.x.x.', soft:0.6 }, lv:{ drums:0, lead:0.2 } },
+  // sparkly, sleigh-bell-bright — Penguin Slide
+  penguin:{ bpm:122, prog:[[60,64,67],[57,60,64],[53,57,60],[55,59,62]], roots:[48,45,41,43],
+    bass:[0,R,12,R,0,R,12,R,0,R,12,R,7,R,12,R], bassV:{ type:'triangle', vol:0.12, dur:0.18, cut:800 },
+    arp:[0,2,1,3,0,2,1,3,0,2,1,3,2,1,0,1], arpV:{ type:'square', vol:0.026, dur:0.09, cut:2600 },
+    pad:{ type:'triangle', vol:0.03, att:0.3, cut:900 },
+    lead:melody('0:84:2 2:88:2 4:91:3 8:88:2 10:84:2 12:86:4 16:84:2 18:81:2 20:84:3 24:86:2 26:88:2 28:84:4 32:79:2 34:84:2 36:88:3 40:86:2 42:83:2 44:79:4 48:81:2 50:84:2 52:88:3 56:86:2 58:84:2 60:83:4'),
+    leadV:{ type:'triangle', vol:0.075, cut:3200, dur:0.16 },
+    drums:{ k:'x...x...x...x...', s:'....x.......x...', h:'x.x.x.x.x.x.x.xx', soft:0.6 }, lv:{ drums:0, lead:0.2 } },
   fitsenior:{ bpm:80, prog:[[53,57,60],[53,58,62],[55,60,64],[53,57,60]], roots:[29,34,36,29],
     bass:[0,R,R,R,R,R,R,R,0,R,R,R,7,R,R,R], bassV:{ type:'sine', vol:0.12, dur:0.6, cut:500 },
     arp:[0,R,1,R,2,R,1,R,0,R,1,R,2,R,1,R], arpV:{ type:'sine', vol:0.065, dur:0.35, cut:2400 },
@@ -689,19 +699,20 @@ scenes.menu = {
   hint:'Hold a hand over a game on the TV to start it',
   enter(){
     this.focus = 0;
-    const card = i => () => { const w = Math.min(W * 0.17, H * 0.4), h = w * 1.3, gap = W * 0.016, tot = 5 * w + 4 * gap; return [W / 2 - tot / 2 + i * (w + gap), H * 0.27, w, h]; };
+    const card = i => () => { const w = Math.min(W * 0.145, H * 0.36), h = w * 1.3, gap = W * 0.016, tot = 6 * w + 5 * gap; return [W / 2 - tot / 2 + i * (w + gap), H * 0.27, w, h]; };
     this.buttons = [
       HoverButton('Fruit Slash', 'Swipe to slice', card(0), () => go('fruit'), '#ff6b5a', { draw:drawFruitIcon, best:'fruit' }),
       HoverButton('Lane Runner', 'Step · jump · 1–2 players', card(1), () => launch('runner'), '#4fd27a', { draw:drawRunnerIcon, best:'runner' }),
       HoverButton('Zombie Siege', 'Aim & blast · 1–2 players', card(2), () => launch('zombie'), '#b46bff', { draw:drawZombieIcon, best:'zombie' }),
       HoverButton('Fit Zone', 'Guided workouts', card(3), () => go('fithub'), '#3ee0c0', { draw:drawFitIcon }),
       HoverButton('Shape Fit', 'Fit the hole · 1–2 players', card(4), () => launch('shape'), '#ff8a3d', { draw:drawShapeIcon, best:'shape' }),
+      HoverButton('Penguin Slide', 'Slip · jump · dash · 1–2 players', card(5), () => launch('penguin'), '#4db8ff', { draw:drawPenguinIcon, best:'penguin' }),
       HoverButton('Customize & shop', '', () => [W / 2 - Math.min(W * 0.2, H * 0.36) / 2, H * 0.87, Math.min(W * 0.2, H * 0.36), H * 0.07], () => go('locker'), '#ffb36b'),
     ];
   },
   keys(k){
     if (k === 'ArrowLeft') this.focus = Math.max(0, this.focus - 1);
-    if (k === 'ArrowRight') this.focus = Math.min(4, this.focus + 1);
+    if (k === 'ArrowRight') this.focus = Math.min(5, this.focus + 1);
     if (k === 'Enter') { SFX.select(); this.buttons[this.focus].action(); }
   },
   update(dt){ this.buttons.forEach((b, i) => b.focus = I.kb.active && i === this.focus); updateButtons(this.buttons, dt, sceneT); },
@@ -727,6 +738,16 @@ function drawRunnerIcon(x, y, w, h){
   ctx.strokeStyle = '#c9d2ff'; ctx.lineWidth = 3;
   for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + s * w * 0.027, top); ctx.lineTo(cx + s * w * 0.127, bot); ctx.stroke(); }
   ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.arc(cx, bot - h * 0.1, h * 0.05, 0, TAU); ctx.fill();
+}
+function drawPenguinIcon(x, y, w, h){
+  const cx = x + w / 2, cy = y + h * 0.55, s = h * 0.62, bob = Math.sin(sceneT * 3) * s * 0.02;
+  ctx.fillStyle = '#e8f6ff'; ctx.beginPath(); ctx.ellipse(cx, cy + s * 0.08, s * 0.5, s * 0.1, 0, 0, TAU); ctx.fill();
+  ctx.save(); ctx.translate(cx, cy + bob); ctx.rotate(Math.sin(sceneT * 2) * 0.12);
+  ctx.fillStyle = '#ff9a1f'; for (const sd of [-1, 1]) { ctx.beginPath(); ctx.moveTo(sd * s * 0.1, -s * 0.06); ctx.lineTo(sd * s * 0.2, s * 0.06); ctx.lineTo(sd * s * 0.04, s * 0.05); ctx.fill(); }
+  ctx.fillStyle = '#1d2233'; for (const sd of [-1, 1]) { ctx.save(); ctx.translate(sd * s * 0.26, -s * 0.28); ctx.rotate(sd * 0.9); ctx.beginPath(); ctx.ellipse(0, 0, s * 0.07, s * 0.2, 0, 0, TAU); ctx.fill(); ctx.restore(); }
+  ctx.fillStyle = '#262c42'; ctx.beginPath(); ctx.ellipse(0, -s * 0.28, s * 0.3, s * 0.3, 0, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.arc(0, -s * 0.62, s * 0.17, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#ff4f6d'; roundRect(-s * 0.19, -s * 0.5, s * 0.38, s * 0.09, s * 0.04); ctx.fill();
+  ctx.restore();
 }
 function drawFitIcon(x, y, w, h){ drawCoach(x + w / 2, y + h * 0.66, h * 0.5, coachPose('jacks', sceneT, false), COACH_STYLE.kids); }
 function drawZombieIcon(x, y, w, h){
@@ -1809,6 +1830,311 @@ scenes.shop = {
     if (this.msg) { ctx.globalAlpha = Math.min(1, (2.5 - this.msg.age) * 2); text(this.msg.t, W * 0.74, H * 0.79, H * 0.038, this.msg.c, 'center', 800); ctx.globalAlpha = 1; }
     text(`Shopping for Player ${this.who + 1} · coins are shared`, W * 0.25, H * 0.93, H * 0.026, '#c9d2ff', 'center', 600);
   }
+};
+/* =====================================================================
+   PENGUIN SLIDE — belly-slide down an icy mountain.
+   Lean to change lane (the ice is slippery, so the penguin skids and overshoots), jump over cracks & rocks,
+   squat to slide under ice arches, and raise both hands to FLAP-DASH through snowmen.
+   Catch fish for coins. 1 player, or 2 players side by side (same mountain, last one sliding wins 50 coins).
+   ===================================================================== */
+const PZONES = [
+  { name:'Snowy Slope',  sky:['#8fd0ff', '#eaf7ff'], snow:['#ffffff', '#dcefff'], mount:['#b9d6ee', '#9fc0de'], line:'#bcd9f2', tree:'#2e7d5b', sun:'#fff6c8' },
+  { name:'Ice Caves',    sky:['#3a79c9', '#a9d6ff'], snow:['#dff4ff', '#a9d8f5'], mount:['#6aa0d6', '#4f86c2'], line:'#8ec5ee', tree:'#1f6b7a', sun:'#d6f1ff' },
+  { name:'Aurora Night', sky:['#0c1240', '#3a2f86'], snow:['#cfd8ff', '#8f9de0'], mount:['#3d4a9c', '#2c3787'], line:'#7787d8', tree:'#1c4a6b', sun:'#fff0c8', stars:true, aurora:true },
+];
+const PENG_ZONE = 600;     // metres per zone
+
+scenes.penguin = {
+  game:true, music:'penguin', hint:'Lean left/right to steer · jump over rocks · squat under arches · hands up to FLAP-DASH through snowmen',
+  enter(){
+    Object.assign(this, { obs:[], fish:[], deco:[], parts:[], pops:[], flakes:[], speed:12, dist:0, fishN:0, smashN:0, lives:3, inv:0, px:0, vx:0, lastLane:0,
+      jumpT:-1, jumpH:0, duckT:0, dashT:0, dashCD:0, upWas:false, dashReq:false, untilRow:26, untilDeco:0, state:'ready', readyT:3.4, t:0, shake:0, flash:0, msgs:[],
+      best:+store.get('mp-best-penguin', 0), zone:0, banner:{ text:PZONES[0].name, t:0 }, banked:false, dead:false, paidFish:0, paidDist:0, coinN:0, wasAir:false, skid:0 });
+    this.R = this.vs ? mulberry32(this.vs.seed + 55) : Math.random;      // two-player: identical mountain for both
+    if (this.vs) this.readyT = 0.01;
+    for (let i = 0; i < 12; i++) this.preDeco(i * 6);
+    for (let i = 0; i < 40; i++) this.flakes.push({ x:rand(0, 1), y:rand(0, 1), s:rand(0.4, 1.2), v:rand(0.06, 0.16) });
+    if (motionLive() && !this.vs) sendTracker({ t:'calibrate' });
+  },
+  exit(){ Music.setTempo(1); this.bank(); },
+  keys(k){ if (k === 'z' || k === 'Z' || k === 'x' || k === 'X') this.dashReq = true; },
+  // Coins are deliberately small in single player: 1 per 3 fish + 1 per 150 m (the 2-player win is the big prize)
+  bank(){ if (this.banked) return; this.banked = true; if (this.coinN > 0) { WALLET.coins += this.coinN; saveWallet(); } },
+  earn(){
+    const want = Math.floor(this.fishN / 3) + Math.floor(this.dist / 150);
+    if (want > this.coinN) { const d = want - this.coinN; this.coinN = want; return d; }
+    return 0;
+  },
+  proj(x, z, h){
+    const LW = Math.min(W * 0.2, H * 0.36), d = Math.max(0.05, z + ZNEAR), s = ZNEAR / d;
+    const HOR = H * 0.36, GY = H * 0.97;
+    return { X: W / 2 + x * LW * s, Y: HOR + (GY - HOR) * s - h * LW * s, s: s * LW };
+  },
+  preDeco(z){ for (const side of [-1, 1]) this.deco.push({ x:side * rand(2.1, 3.1), z:z + rand(0, 4), k:Math.random(), side }); },
+
+  spawnRow(z){
+    const R = this.R || Math.random;
+    const lanes = [-1, 0, 1].sort(() => R() - 0.5);
+    const types = ['rock', 'arch', 'snowman', 'wall'], pk = () => types[Math.floor(R() * 4)];
+    const r = R();
+    if (r < 0.38) { this.obs.push({ lane:lanes[0], z, type:pk() }); this.fishLine(lanes[1], z); }
+    else if (r < 0.68) { this.obs.push({ lane:lanes[0], z, type:pk() }, { lane:lanes[1], z, type:pk() }); this.fishLine(lanes[2], z - 4); }
+    else if (r < 0.86 && this.t > 12) { const tp = R() < 0.5 ? 'rock' : 'arch'; for (const l of lanes) this.obs.push({ lane:l, z, type:tp }); }
+    else this.fishLine(lanes[0], z);
+  },
+  fishLine(lane, z){ for (let i = 0; i < 5; i++) this.fish.push({ lane, z:z + i * 2.2, h:0.5 }); },
+
+  update(dt){
+    this.parts = stepParts(this.parts, dt); this.pops = stepPops(this.pops, dt);
+    for (const f of this.flakes) { f.y += f.v * dt * (1 + this.speed * 0.05); f.x += Math.sin(sceneT + f.s * 9) * dt * 0.02; if (f.y > 1.02) { f.y = -0.02; f.x = rand(0, 1); } }
+    if (this.state === 'ready') { const p = this.readyT; this.readyT -= dt; countBeep(p, this.readyT); takeJump(); if (this.readyT <= 0) { this.state = 'play'; SFX.go(); } return; }
+    this.t += dt;
+    const dashing = this.dashT > 0;
+    this.speed = Math.min(26, 12 + this.t * 0.16);
+    if (!this.vs) Music.setTempo(0.94 + (this.speed - 12) / 14 * 0.28);
+    const dz = this.speed * (dashing ? 1.7 : 1) * dt;
+    this.dist += dz;
+
+    const zi = Math.floor(this.dist / PENG_ZONE) % PZONES.length;
+    if (zi !== this.zone) { this.zone = zi; this.banner = { text:PZONES[zi].name, t:0 }; SFX.swoosh(); }
+    this.banner.t += dt;
+
+    // steering: the ice makes the penguin skid — a springy, slippery glide towards the lane you lean to
+    const target = laneInput();
+    if (target !== this.lastLane) { SFX.whoosh(); this.lastLane = target; this.skid = 0.4; }
+    this.vx += (target - this.px) * dt * 55; this.vx *= Math.max(0, 1 - dt * 7.5);
+    this.px = clamp(this.px + this.vx * dt, -1.35, 1.35);
+    this.skid = Math.max(0, this.skid - dt);
+
+    if (takeJump() && this.jumpT < 0) { this.jumpT = 0; this.duckT = 0; SFX.boing(); this.wasAir = true; this.puff(6); }
+    if (this.jumpT >= 0) {
+      this.jumpT += dt; const u = this.jumpT / 0.78;
+      if (duckInput() && u > 0.2) this.jumpT = -1;
+      if (u >= 1 || this.jumpT < 0) { this.jumpT = -1; this.jumpH = 0; } else this.jumpH = 4 * 1.45 * u * (1 - u);
+    }
+    if (this.jumpT < 0 && this.wasAir) { this.wasAir = false; SFX.land(); this.puff(8); }
+    if (duckInput() && this.jumpT < 0) this.duckT = Math.max(this.duckT, 0.55);
+    this.duckT = Math.max(0, this.duckT - dt);
+    const ducking = this.duckT > 0 && this.jumpT < 0;
+
+    // flap-dash: raise both hands (or press Z). Smashes snowmen. Recharges in a few seconds.
+    const up = !!I.up, edge = up && !this.upWas; this.upWas = up;
+    this.dashCD = Math.max(0, this.dashCD - dt); this.dashT = Math.max(0, this.dashT - dt);
+    if ((edge || this.dashReq) && this.dashCD <= 0 && this.dashT <= 0) { this.dashT = 0.9; this.dashCD = 4.5; SFX.fanfare(); this.flash = 0.25; pop(this.pops, W / 2, H * 0.3, 'FLAP DASH!', '#7fe6ff', 0.06, 0.9); }
+    this.dashReq = false;
+    this.inv = Math.max(0, this.inv - dt);
+    this.shake = Math.max(0, this.shake - dt * 2.5); this.flash = Math.max(0, this.flash - dt * 2);
+
+    // snow spray behind the slider
+    this.skidT = (this.skidT || 0) - dt;
+    if (this.skidT <= 0 && this.jumpT < 0) { this.skidT = dashing ? 0.02 : 0.07; this.puff(dashing ? 2 : 1, dashing); }
+
+    this.untilRow -= dz;
+    if (this.untilRow <= 0) { this.spawnRow(72); this.untilRow = 15 + this.R() * 8; }
+    this.untilDeco -= dz; if (this.untilDeco <= 0) { this.untilDeco = rand(4, 7); this.preDeco(72); }
+
+    for (const o of this.obs) {
+      o.z -= dz;
+      if (o.hit || o.passed || o.smashed) continue;
+      const len = o.type === 'wall' ? 3.2 : 0.4;
+      if (o.z < PZ + 0.3 && o.z + len > PZ - 0.3 && Math.abs(this.px - o.lane) < 0.55) {
+        if (o.type === 'snowman' && dashing) {
+          o.smashed = true; this.smashN++; this.fishN += 2; SFX.hit(); this.shake = 0.5;
+          const p = this.proj(o.lane, o.z, 0.8); burst(this.parts, p.X, p.Y, 18, ['#fff', '#dff4ff', '#ff9a3f'], H * 0.9, H * 0.012, 0.8, 0.8);
+          pop(this.pops, p.X, p.Y, 'SMASH! +2 fish', '#7fe6ff', 0.045, 1); continue;
+        }
+        if (this.inv > 0) continue;
+        const safe = (o.type === 'rock' && this.jumpH > 0.55) || (o.type === 'arch' && ducking);
+        if (!safe) {
+          o.hit = true; this.lives--; this.inv = 1.5; this.shake = 1; SFX.hit();
+          this.msgs.push({ text:o.type === 'rock' ? 'Jump!' : o.type === 'arch' ? 'Squat!' : o.type === 'snowman' ? 'Flap-dash it!' : 'Change lanes!', t:0 });
+        } else if (!o.cheered) { o.cheered = true; const p = this.proj(this.px, PZ, 1.6); pop(this.pops, p.X, p.Y, 'Nice!', '#4fd27a', 0.04, 0.8); }
+      }
+      if (o.z + len < PZ - 0.4) o.passed = true;
+    }
+    for (const f of this.fish) {
+      f.z -= dz;
+      if (!f.got && Math.abs(f.z - PZ) < 0.7 && Math.abs(this.px - f.lane) < 0.55 && Math.abs(this.jumpH + 0.4 - f.h) < 0.95) {
+        f.got = true; this.fishN++;
+        tone(1100 + (this.fishN % 8) * 80, 0.07, 'triangle', 0.06); setTimeout(() => tone(1500 + (this.fishN % 8) * 80, 0.09, 'triangle', 0.05), 50);
+        const p = this.proj(f.lane, f.z, f.h); burst(this.parts, p.X, p.Y, 7, ['#7fe6ff', '#ffffff'], H * 0.4, H * 0.008, 0.4, 0.5);
+      }
+    }
+    this.obs = this.obs.filter(o => o.z > -4 && !o.smashed);
+    this.fish = this.fish.filter(f => f.z > -2 && !f.got);
+    for (const d of this.deco) d.z -= dz;
+    this.deco = this.deco.filter(d => d.z > -4);
+    for (const m of this.msgs) m.t += dt;
+    this.msgs = this.msgs.filter(m => m.t < 1.1);
+
+    const got = this.earn();
+    if (got > 0) pop(this.pops, W * 0.5, H * 0.22, `+${got} coin${got > 1 ? 's' : ''}`, '#ffd23f', 0.045, 1);
+    if (this.lives <= 0) {
+      const res = { game:'penguin', score:Math.floor(this.dist) + this.fishN * 10 + this.smashN * 30, detail:`${Math.floor(this.dist)} m · ${this.fishN} fish · ${this.smashN} snowmen smashed`, coins:this.coinN };
+      if (this.vs) { if (!this.dead) { this.dead = true; this.vs.onDead(this, res); } } else go('over', res);
+    }
+  },
+  rescale(sc){ for (const arr of [this.parts, this.pops]) for (const o of arr) sc(o, true); },
+  puff(n, big){
+    const p = this.proj(this.px, PZ, this.jumpH);
+    for (let i = 0; i < n; i++) this.parts.push({ x:p.X + rand(-0.2, 0.2) * p.s, y:p.Y - p.s * 0.05, vx:rand(-0.6, 0.6) * p.s, vy:-rand(0.2, 0.9) * p.s * (big ? 0.8 : 0.5), r:p.s * rand(0.03, 0.08) * (big ? 1.5 : 1), c:big ? 'rgba(160,230,255,0.9)' : 'rgba(255,255,255,0.85)', life:0.5, max:0.5, g:0.05 });
+  },
+
+  /* ---------- drawing ---------- */
+  skyLayer(i){
+    const Z = PZONES[i], HOR = H * 0.36;
+    return cachedLayer('pz' + i, g => {
+      const sky = g.createLinearGradient(0, 0, 0, HOR + 2); sky.addColorStop(0, Z.sky[0]); sky.addColorStop(1, Z.sky[1]);
+      g.fillStyle = sky; g.fillRect(0, 0, W, HOR + 2);
+      if (Z.stars) { g.fillStyle = '#fff'; for (let n = 0; n < 70; n++) { g.globalAlpha = rand(0.3, 1); g.beginPath(); g.arc(rand(0, W), rand(0, HOR * 0.85), rand(1, 2.2), 0, TAU); g.fill(); } g.globalAlpha = 1; }
+      if (Z.aurora) for (let b = 0; b < 3; b++) { const gr = g.createLinearGradient(0, HOR * 0.1, 0, HOR * 0.7); gr.addColorStop(0, 'rgba(80,255,190,0)'); gr.addColorStop(0.5, `rgba(${80 + b * 60},255,${190 - b * 40},0.35)`); gr.addColorStop(1, 'rgba(80,255,190,0)'); g.fillStyle = gr; g.beginPath(); g.moveTo(0, HOR * 0.5); for (let x = 0; x <= W; x += W / 12) g.lineTo(x, HOR * (0.3 + b * 0.1) + Math.sin(x / W * 6 + b) * HOR * 0.12); g.lineTo(W, HOR * 0.7); g.lineTo(0, HOR * 0.7); g.closePath(); g.fill(); }
+      const sx = W * 0.78, sy = HOR * 0.36, sr = H * 0.045;
+      const gl = g.createRadialGradient(sx, sy, sr * 0.4, sx, sy, sr * 4); gl.addColorStop(0, Z.sun + 'aa'); gl.addColorStop(1, Z.sun + '00'); g.fillStyle = gl; g.fillRect(sx - sr * 4, sy - sr * 4, sr * 8, sr * 8);
+      g.fillStyle = Z.sun; g.beginPath(); g.arc(sx, sy, sr, 0, TAU); g.fill();
+      // snowy mountains
+      for (const [col, k, amp, off] of [[Z.mount[0], 0.85, 0.2, 0], [Z.mount[1], 1, 0.14, 2.3]]) {
+        g.fillStyle = col; g.beginPath(); g.moveTo(0, HOR + 2);
+        for (let x = 0; x <= W + 1; x += W / 24) { const yy = HOR - (Math.abs(Math.sin(x / W * 5 + off)) * amp + 0.04) * HOR * k; g.lineTo(x, yy); }
+        g.lineTo(W, HOR + 2); g.closePath(); g.fill();
+      }
+    });
+  },
+  draw(now){
+    const Z = PZONES[this.zone], HOR = H * 0.36, GY = H * 0.97;
+    ctx.save();
+    if (this.shake > 0) ctx.translate(rand(-1, 1) * this.shake * H * 0.012, rand(-1, 1) * this.shake * H * 0.012);
+    ctx.drawImage(this.skyLayer(this.zone), 0, 0);
+    // slope
+    const sg = ctx.createLinearGradient(0, HOR, 0, H); sg.addColorStop(0, Z.snow[1]); sg.addColorStop(1, Z.snow[0]);
+    ctx.fillStyle = sg; ctx.fillRect(0, HOR, W, H - HOR);
+    // moving ice bands + lane tracks so you can feel the speed
+    const a = this.proj(-1.7, 80, 0), b = this.proj(-1.7, 0, 0), c = this.proj(1.7, 80, 0), d = this.proj(1.7, 0, 0);
+    ctx.fillStyle = Z.line + '88'; ctx.beginPath(); ctx.moveTo(a.X, a.Y); ctx.lineTo(c.X, c.Y); ctx.lineTo(d.X + (d.X - c.X) * 2, H); ctx.lineTo(b.X - (d.X - c.X) * 2, H); ctx.closePath(); ctx.fill();
+    for (let z0 = -(this.dist % 6); z0 < 80; z0 += 6) {
+      const p1 = this.proj(-1.7, z0, 0), p2 = this.proj(1.7, z0, 0), p3 = this.proj(1.7, z0 + 2.2, 0), p4 = this.proj(-1.7, z0 + 2.2, 0);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.moveTo(p1.X, p1.Y); ctx.lineTo(p2.X, p2.Y); ctx.lineTo(p3.X, p3.Y); ctx.lineTo(p4.X, p4.Y); ctx.closePath(); ctx.fill();
+    }
+    ctx.strokeStyle = Z.line; ctx.lineWidth = Math.max(2, H * 0.004);
+    for (const lx of [-1.5, -0.5, 0.5, 1.5]) { const p1 = this.proj(lx, 70, 0), p2 = this.proj(lx, -1, 0); ctx.beginPath(); ctx.moveTo(p1.X, p1.Y); ctx.lineTo(p2.X, p2.Y); ctx.stroke(); }
+
+    // everything standing on the slope, far to near
+    const things = [];
+    for (const dc of this.deco) things.push({ z:dc.z, k:'deco', o:dc });
+    for (const o of this.obs) things.push({ z:o.z, k:'obs', o });
+    for (const f of this.fish) things.push({ z:f.z, k:'fish', o:f });
+    things.push({ z:PZ, k:'me' });
+    things.sort((p, q) => q.z - p.z);
+    for (const th of things) {
+      if (th.z > 72) continue;
+      if (th.k === 'deco') this.drawPine(th.o, Z);
+      else if (th.k === 'obs') this.drawObs(th.o);
+      else if (th.k === 'fish') this.drawFish(th.o);
+      else this.drawPenguin(now);
+    }
+    drawParts(this.parts);
+    // falling snow
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    for (const f of this.flakes) { ctx.beginPath(); ctx.arc(f.x * W, f.y * H, Math.max(1.2, f.s * H * 0.004), 0, TAU); ctx.fill(); }
+    if (this.dashT > 0) { ctx.strokeStyle = 'rgba(200,245,255,0.5)'; ctx.lineWidth = 3; for (let i = 0; i < 14; i++) { const x = ((i * 137.5 + sceneT * 900) % W), y0 = (i * 91) % H; ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x + (x - W / 2) * 0.12, y0 + H * 0.12); ctx.stroke(); } }
+    drawPops(this.pops);
+    ctx.restore();
+    if (this.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${this.flash * 0.5})`; ctx.fillRect(0, 0, W, H); }
+    if (this.inv > 0 && this.lives > 0 && ((this.inv * 10) | 0) % 2 === 0) { ctx.fillStyle = 'rgba(255,60,80,0.10)'; ctx.fillRect(0, 0, W, H); }
+    this.drawHud();
+    if (this.state === 'ready') {
+      const n = Math.ceil(this.readyT);
+      text(n > 0 && this.readyT < 3 ? String(n) : 'Get ready!', W / 2, H * 0.45, H * (n > 0 && this.readyT < 3 ? 0.2 : 0.08), '#fff');
+      text('Lean to steer · jump · squat · hands up = FLAP-DASH', W / 2, H * 0.58, H * 0.03, '#fff', 'center', 700);
+    }
+  },
+  drawHud(){
+    const fk = Math.min(1, W / (H * 1.3));
+    text(`${Math.floor(this.dist)} m`, W * 0.04, H * 0.075, H * 0.07 * fk, '#fff', 'left');
+    ctx.fillStyle = '#7fe6ff'; ctx.beginPath(); ctx.ellipse(W * 0.045, H * 0.135, H * 0.018, H * 0.011, 0, 0, TAU); ctx.fill();
+    text(`${this.fishN} fish · ● ${this.coinN}`, W * 0.075, H * 0.14, H * 0.036 * fk, '#fff', 'left', 700);
+    text(`Best ${this.best}`, W * 0.04, H * 0.185, H * 0.028 * fk, '#e8f4ff', 'left', 600);
+    for (let i = 0; i < 3; i++) text('♥', W * (0.86 + i * 0.045 * (fk < 1 ? 0.8 : 1)) , H * 0.07, H * 0.06 * fk, i < this.lives ? '#ff3b6b' : 'rgba(255,255,255,0.4)');
+    // dash meter
+    const bw = Math.min(W * 0.3, H * 0.55), bx = W / 2 - bw / 2, by = H * 0.93, k = this.dashT > 0 ? 1 - this.dashT / 0.9 : 1 - this.dashCD / 4.5;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; roundRect(bx, by, bw, H * 0.022, H * 0.011); ctx.fill();
+    ctx.fillStyle = this.dashCD <= 0 && this.dashT <= 0 ? '#7fe6ff' : '#4a86b0'; roundRect(bx, by, Math.max(H * 0.022, bw * k), H * 0.022, H * 0.011); ctx.fill();
+    text(this.dashCD <= 0 && this.dashT <= 0 ? 'FLAP-DASH ready — hands up!' : 'dash…', W / 2, by - H * 0.012, H * 0.024 * fk, '#fff', 'center', 700);
+    if (this.banner.t < 2.4) { ctx.globalAlpha = Math.min(1, (2.4 - this.banner.t) * 2); text(this.banner.text, W / 2, H * 0.2, H * 0.06 * fk, '#fff'); ctx.globalAlpha = 1; }
+    for (const m of this.msgs) { ctx.globalAlpha = 1 - m.t / 1.1; text(m.text, W / 2, H * 0.5 - m.t * H * 0.05, H * 0.07 * fk, '#ff6b5a'); ctx.globalAlpha = 1; }
+  },
+  drawPine(dc, Z){
+    const p = this.proj(dc.x, dc.z, 0), s = p.s; if (s < 3) return;
+    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(p.X - s * 0.04, p.Y - s * 0.3, s * 0.08, s * 0.3);
+    for (let i = 0; i < 3; i++) {
+      const w = s * (0.42 - i * 0.1), y = p.Y - s * (0.25 + i * 0.28);
+      ctx.fillStyle = Z.tree; ctx.beginPath(); ctx.moveTo(p.X - w, y); ctx.lineTo(p.X, y - s * 0.4); ctx.lineTo(p.X + w, y); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(p.X - w * 0.62, y - s * 0.13); ctx.lineTo(p.X, y - s * 0.4); ctx.lineTo(p.X + w * 0.62, y - s * 0.13); ctx.quadraticCurveTo(p.X, y - s * 0.05, p.X - w * 0.62, y - s * 0.13); ctx.fill();
+    }
+  },
+  drawObs(o){
+    const p = this.proj(o.lane, o.z, 0), s = p.s; if (s < 2) return;
+    ctx.fillStyle = 'rgba(40,70,110,0.22)'; ctx.beginPath(); ctx.ellipse(p.X, p.Y, s * 0.42, s * 0.09, 0, 0, TAU); ctx.fill();
+    if (o.type === 'rock') {
+      ctx.fillStyle = '#7f8da3'; ctx.beginPath(); ctx.ellipse(p.X, p.Y - s * 0.15, s * 0.38, s * 0.22, 0, Math.PI, 0); ctx.lineTo(p.X + s * 0.38, p.Y); ctx.lineTo(p.X - s * 0.38, p.Y); ctx.fill();
+      ctx.fillStyle = '#aab6c9'; ctx.beginPath(); ctx.ellipse(p.X - s * 0.1, p.Y - s * 0.22, s * 0.16, s * 0.08, -0.3, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#4b5870'; ctx.lineWidth = Math.max(1, s * 0.015); ctx.beginPath(); ctx.moveTo(p.X + s * 0.05, p.Y - s * 0.3); ctx.lineTo(p.X + s * 0.12, p.Y - s * 0.12); ctx.stroke();
+    } else if (o.type === 'arch') {
+      const top = 1.55, lo = 0.95;
+      ctx.fillStyle = 'rgba(160,225,255,0.85)'; ctx.fillRect(p.X - s * 0.52, p.Y - s * top, s * 0.14, s * top); ctx.fillRect(p.X + s * 0.38, p.Y - s * top, s * 0.14, s * top);
+      ctx.fillStyle = 'rgba(190,238,255,0.92)'; roundRect(p.X - s * 0.56, p.Y - s * top, s * 1.12, s * (top - lo), s * 0.06); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(p.X - s * 0.5, p.Y - s * top + s * 0.03, s * 0.5, s * 0.04);
+      ctx.fillStyle = '#e8fbff'; for (let i = 0; i < 4; i++) { const ix = p.X - s * 0.4 + i * s * 0.27; ctx.beginPath(); ctx.moveTo(ix, p.Y - s * lo); ctx.lineTo(ix + s * 0.07, p.Y - s * lo); ctx.lineTo(ix + s * 0.035, p.Y - s * (lo - 0.16)); ctx.fill(); }
+    } else if (o.type === 'snowman') {
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#c4d7ea'; ctx.lineWidth = Math.max(1, s * 0.015);
+      for (const [yy, r] of [[0.28, 0.3], [0.78, 0.22], [1.15, 0.16]]) { ctx.beginPath(); ctx.arc(p.X, p.Y - s * yy, s * r, 0, TAU); ctx.fill(); ctx.stroke(); }
+      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(p.X - s * 0.05, p.Y - s * 1.18, s * 0.017, 0, TAU); ctx.arc(p.X + s * 0.05, p.Y - s * 1.18, s * 0.017, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ff8a1f'; ctx.beginPath(); ctx.moveTo(p.X, p.Y - s * 1.14); ctx.lineTo(p.X + s * 0.2, p.Y - s * 1.1); ctx.lineTo(p.X, p.Y - s * 1.08); ctx.fill();
+      ctx.fillStyle = '#d6264a'; ctx.fillRect(p.X - s * 0.16, p.Y - s * 0.98, s * 0.32, s * 0.06);
+      ctx.fillStyle = '#222'; ctx.fillRect(p.X - s * 0.13, p.Y - s * 1.46, s * 0.26, s * 0.12); ctx.fillRect(p.X - s * 0.19, p.Y - s * 1.35, s * 0.38, s * 0.03);
+    } else {   // wall of ice (dodge it)
+      const f = this.proj(o.lane, o.z, 0), len = 3.2, bck = this.proj(o.lane, o.z + len, 0);
+      ctx.fillStyle = 'rgba(120,190,235,0.9)'; ctx.fillRect(f.X - f.s * 0.5, f.Y - f.s * 0.95, f.s, f.s * 0.95);
+      ctx.fillStyle = 'rgba(190,235,255,0.95)'; ctx.beginPath(); ctx.moveTo(f.X - f.s * 0.5, f.Y - f.s * 0.95); ctx.lineTo(f.X + f.s * 0.5, f.Y - f.s * 0.95); ctx.lineTo(bck.X + bck.s * 0.5, bck.Y - bck.s * 0.95); ctx.lineTo(bck.X - bck.s * 0.5, bck.Y - bck.s * 0.95); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(f.X - f.s * 0.42, f.Y - f.s * 0.85, f.s * 0.2, f.s * 0.55);
+    }
+  },
+  drawFish(f){
+    const p = this.proj(f.lane, f.z, f.h), s = p.s; if (s < 3) return;
+    const wob = Math.sin(sceneT * 8 + f.z) * 0.15;
+    ctx.save(); ctx.translate(p.X, p.Y); ctx.rotate(wob);
+    ctx.fillStyle = '#7fe6ff'; ctx.beginPath(); ctx.ellipse(0, 0, s * 0.2, s * 0.1, 0, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(s * 0.17, 0); ctx.lineTo(s * 0.32, -s * 0.1); ctx.lineTo(s * 0.32, s * 0.1); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-s * 0.11, -s * 0.02, s * 0.025, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#d6f6ff'; ctx.beginPath(); ctx.ellipse(-s * 0.02, s * 0.03, s * 0.12, s * 0.035, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  },
+  drawPenguin(now){
+    const p = this.proj(this.px, PZ, this.jumpH), g = this.proj(this.px, PZ, 0), s = p.s;
+    const dashing = this.dashT > 0, flat = (this.duckT > 0 && this.jumpT < 0) ? 0.62 : 1, tilt = clamp(this.vx * 0.22, -0.5, 0.5);
+    if (this.inv > 0 && ((this.inv * 14) | 0) % 2 === 0) ctx.globalAlpha = 0.4;
+    ctx.fillStyle = 'rgba(40,70,110,0.28)'; ctx.beginPath(); ctx.ellipse(g.X, g.Y, s * 0.4 * (1 - this.jumpH * 0.1), s * 0.09, 0, 0, TAU); ctx.fill();
+    ctx.save(); ctx.translate(p.X, p.Y - s * 0.05); ctx.rotate(tilt); ctx.scale(1, flat);
+    if (dashing) { const gl = ctx.createRadialGradient(0, -s * 0.3, 0, 0, -s * 0.3, s * 0.8); gl.addColorStop(0, 'rgba(150,235,255,0.7)'); gl.addColorStop(1, 'rgba(150,235,255,0)'); ctx.fillStyle = gl; ctx.fillRect(-s, -s * 1.2, s * 2, s * 1.8); }
+    const flap = dashing ? Math.sin(sceneT * 30) * 0.5 : Math.sin(sceneT * 4 + this.dist * 0.2) * 0.1;
+    // feet trailing behind (towards the camera)
+    ctx.fillStyle = '#ff9a1f';
+    for (const sd of [-1, 1]) { ctx.beginPath(); ctx.moveTo(sd * s * 0.1, -s * 0.06); ctx.lineTo(sd * s * 0.2, s * 0.06 + (dashing ? 0 : 0)); ctx.lineTo(sd * s * 0.04, s * 0.05); ctx.closePath(); ctx.fill(); }
+    // flippers
+    ctx.fillStyle = '#1d2233';
+    for (const sd of [-1, 1]) { ctx.save(); ctx.translate(sd * s * 0.26, -s * 0.28); ctx.rotate(sd * (0.7 + flap + (dashing ? 0.5 : 0))); ctx.beginPath(); ctx.ellipse(0, 0, s * 0.07, s * 0.2, 0, 0, TAU); ctx.fill(); ctx.restore(); }
+    // body (back view) + highlight
+    ctx.fillStyle = '#262c42'; ctx.beginPath(); ctx.ellipse(0, -s * 0.28, s * 0.3, s * 0.3, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.beginPath(); ctx.ellipse(-s * 0.08, -s * 0.38, s * 0.1, s * 0.16, 0.3, 0, TAU); ctx.fill();
+    // head
+    ctx.fillStyle = '#262c42'; ctx.beginPath(); ctx.arc(0, -s * 0.62, s * 0.17, 0, TAU); ctx.fill();
+    // scarf in the player's colour
+    const col = this.vs ? PCOL[this.vs.pl] : '#ff4f6d';
+    ctx.fillStyle = col; roundRect(-s * 0.19, -s * 0.5, s * 0.38, s * 0.09, s * 0.04); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(s * 0.1, -s * 0.43); ctx.lineTo(s * 0.28 + Math.sin(sceneT * 9) * s * 0.03, -s * 0.34); ctx.lineTo(s * 0.12, -s * 0.37); ctx.fill();
+    // beak tip peeking either side + cap bobble
+    ctx.fillStyle = '#ff9a1f'; ctx.beginPath(); ctx.moveTo(-s * 0.04, -s * 0.76); ctx.lineTo(0, -s * 0.8); ctx.lineTo(s * 0.04, -s * 0.76); ctx.fill();
+    ctx.restore(); ctx.globalAlpha = 1;
+  },
 };
 /* =====================================================================
    ZOMBIE SIEGE — aim with your hands; hovering over a zombie fires.
@@ -3268,7 +3594,7 @@ function inHalf(side, fn){
   try { fn(); } finally { W = fullW; ctx.restore(); }
 }
 const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-const GAME_NAMES = { runner:'Lane Runner', zombie:'Zombie Siege', shape:'Shape Fit' };
+const GAME_NAMES = { runner:'Lane Runner', zombie:'Zombie Siege', shape:'Shape Fit', penguin:'Penguin Slide' };
 
 /* ---------- 1 player or 2? ---------- */
 scenes.players = {
@@ -3306,7 +3632,7 @@ scenes.players = {
 scenes.versus = {
   game:true, ownCursors:true, ownHands:true, players:2,
   hint:'Player 1 on the left, Player 2 on the right',
-  music:d => d && d.game === 'zombie' ? 'zombie' : d && d.game === 'shape' ? 'shape' : 'runner',
+  music:d => d && d.game === 'zombie' ? 'zombie' : d && d.game === 'shape' ? 'shape' : d && d.game === 'penguin' ? 'penguin' : 'runner',
   enter(d){
     bgCache = {};
     Object.assign(this, { kind:(d && d.game) || 'runner', state:'ready', stateT:0, seed:(Math.random() * 1e9) | 0, insts:null, dead:[null, null], winner:null, finished:false,
@@ -3430,6 +3756,7 @@ scenes.versus = {
     text(GAME_NAMES[this.kind] + '  ·  2 players', W / 2, H * 0.045, H * 0.04, '#fff');
     if (this.state === 'ready') {
       text(motionLive() ? 'Stand side by side in front of the tablet — it starts when both can be seen' : 'Press Enter to start (keyboard test: Player 1 only)', W / 2, H * 0.925, H * 0.03, '#ffe9a8', 'center', 700);
+      if (motionLive()) text(`Tablet sees ${I.seen || 0} ${I.seen === 1 ? 'person' : 'people'}  ·  P1 ${I.present ? '✓' : '✗'}  P2 ${I2.present ? '✓' : '✗'}${I.np === 1 ? '  ·  switching to 2-player mode…' : (I.seen === 1 && this.stateT > 4 ? '  ·  step back so BOTH of you fit in the picture' : '')}`, W / 2, H * 0.875, H * 0.026, '#cfe0ff', 'center', 600);
       drawButtons(this.buttons);
     } else if (this.state === 'cal') {
       text('Hold still…', W / 2, H * 0.5, H * 0.07, '#fff');

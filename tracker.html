@@ -57,6 +57,7 @@
   <button data-go="zombie">Zombie Siege</button>
   <button data-go="fithub">Fit Zone</button>
   <button data-go="shape">Shape Fit</button>
+  <button data-go="penguin">Penguin Slide</button>
   <button data-go="locker">Customize</button>
   <button data-go="shop">Coin shop</button>
   <button id="musicBtn">♪ Music</button>
@@ -316,6 +317,7 @@ function tick(){
   S.frames++; S.frameNo++;
 
   const aspect = (video.videoWidth || 4) / (video.videoHeight || 3);
+  S.seen = (res?.landmarks || []).length;
   const poses = (res?.landmarks || []).slice(0, S.players);
   const who = assignPoses(poses);
   const outs = [];
@@ -351,9 +353,11 @@ async function rebuildLandmarker(){
     do {
       S.rebuildAgain = false;
       const want = S.players, old = S.landmarker;
-      const lm = await createLandmarker($('#accurate').checked, want);
-      S.landmarker = lm; S.lmPlayers = want;
+      S.landmarker = null;                                  // pause tracking for a moment; close the old model FIRST so the tablet's GPU is free for the new one
       try { old && old.close(); } catch {}
+      await new Promise(r => setTimeout(r, 150));
+      S.landmarker = await createLandmarker($('#accurate').checked, want); S.lmPlayers = want;
+      note(want > 1 ? 'Two-player model ready' : 'One-player model ready');
     } while (S.rebuildAgain || S.lmPlayers !== S.players);
   } catch (e) { console.warn('rebuild', e); note('Could not switch player mode'); }
   S.rebuilding = false;
@@ -607,7 +611,7 @@ function pack(q, d){
 function maybeSend(now, outs){
   if (now - S.lastSend < 1000 / CFG.maxSendHz) return;
   S.lastSend = now;
-  const msg = Object.assign({ t:'f', ts: Math.round(now * 10) / 10 }, pack(PL[0], outs[0].data));
+  const msg = Object.assign({ t:'f', ts: Math.round(now * 10) / 10, seen: S.seen | 0, np: S.lmPlayers || 1 }, pack(PL[0], outs[0].data));
   if (S.players > 1) msg.p2 = pack(PL[1], outs[1] && outs[1].data);
   send(msg);
 }
@@ -655,6 +659,7 @@ function stats(now){
   if (now - S.lastStat < 1000) return;
   $('#fps').textContent = Math.round(S.frames / ((now - S.lastStat) / 1000));
   S.frames = 0; S.lastStat = now;
+  if (S.players > 1) $('#calState').textContent = `2-player · model for ${S.lmPlayers || 1} · sees ${S.seen | 0} ${S.seen === 1 ? 'person' : 'people'}`;
 }
 </script>
 </body>
