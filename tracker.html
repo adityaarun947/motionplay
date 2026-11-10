@@ -59,6 +59,8 @@
   <button data-go="shape">Shape Fit</button>
   <button data-go="penguin">Penguin Slide</button>
   <button data-go="balloon">Balloon Burst</button>
+  <button data-go="simon">Simon Says</button>
+  <button data-go="boxing">Boxing Dojo</button>
   <button data-go="locker">Customize</button>
   <button data-go="shop">Coin shop</button>
   <button id="musicBtn">♪ Music</button>
@@ -96,6 +98,9 @@ const CFG = {
   // Hand cursor box, in shoulder-widths around your shoulders (smaller = less arm travel)
   reachX: 4.4, reachTop: 2.1, reachH: 4.0,
   handReach: 0.6,           // cursor point: 0 = wrist, 1 = index knuckle
+  graceMs: 350,             // keep going on the last good frame this long if the camera loses you for a moment
+  holdVis: 0.25,            // a joint seen less clearly than this keeps its last position
+  jumpMax: 0.30,            // a joint that leaps further than this (body-heights) in one frame is treated as a glitch
   handHoldMs: 160,          // keep a hand alive this long when motion blur hides it
   // One Euro filters: higher beta = snappier when moving fast, higher minCutoff = less smoothing when still
   bodyFilter: { minCutoff: 1.0, beta: 4.0, dCutoff: 1.0 },
@@ -375,19 +380,29 @@ function setPlayers(n){
 
 // One person's whole pipeline: filter → calibrate → gestures → hands → exercise numbers.  Returns {sm, data} (data = null if not seen).
 function processPose(lm, dt, now, aspect){
-  if (!lm) { noPerson(now); return { sm:null, data:null }; }
+  // A missed frame or two (motion blur, a hand across the body) shouldn't make you vanish: coast on the last good result for a moment
+  if (!lm) { if (Q.lastRes && now - Q.lastGood < CFG.graceMs) return Q.lastRes; noPerson(now); return { sm:null, data:null }; }
 
   // 1) Mirror (moving right = right on TV) and convert to "height units" so X and Y share a scale
   const raw = lm.map(p => ({ X:(1 - p.x) * aspect, Y:p.y, v: p.visibility ?? 1 }));
+  // 1b) Clean the raw points: a joint the camera barely sees holds its last spot, and a one-frame teleport
+  // (the model briefly grabbing a chair, a shadow, the other person) is ignored for up to 3 frames.
+  if (!Q.prevRaw || now - Q.lastGood > 600) { Q.prevRaw = raw.map(p => ({ X:p.X, Y:p.Y })); Q.rej = new Array(raw.length).fill(0); }
+  else for (let i = 0; i < raw.length; i++) {
+    const p = raw[i], o = Q.prevRaw[i], jump = Math.hypot(p.X - o.X, p.Y - o.Y);
+    if (p.v < CFG.holdVis || (jump > CFG.jumpMax * Math.max(1, dt * 30) && p.v < 0.85 && Q.rej[i] < 3)) { Q.rej[i] += p.v < CFG.holdVis ? 0 : 1; p.X = o.X; p.Y = o.Y; }
+    else Q.rej[i] = 0;
+    o.X = p.X; o.Y = p.Y;
+  }
 
   // 2) Filter the body. If you were gone for a while, restart the filters so nothing slides in from the old spot.
   if (now - Q.lostAt < 1e9 && !Q.present && now - Q.lostAt > 500) for (const f of Q.bodyF) { f[0].reset(); f[1].reset(); }
   const sm = raw.map((p, i) => ({ X: Q.bodyF[i][0].filter(p.X, dt), Y: Q.bodyF[i][1].filter(p.Y, dt), v: p.v }));
-  Q.sm = sm;
+  Q.sm = sm; Q.lmz = lm.map(p => p.z || 0); Q.aspect = aspect;
 
   const body = measure(sm);
   body.shVy = (Q.bodyF[P.LSH][1].v + Q.bodyF[P.RSH][1].v) / 2;   // + = moving down
-  if (body.sh.v < 0.5) { noPerson(now); return { sm, data:null }; }
+  if (body.sh.v < 0.5) { if (Q.lastRes && now - Q.lastGood < CFG.graceMs) return Q.lastRes; noPerson(now); return { sm, data:null }; }
   if (!Q.present) { Q.present = true; Q.presentSince = now; }
 
   // 2b) Keep the on-screen figure a constant size: follow how wide your shoulders look to the camera.
@@ -426,7 +441,8 @@ function processPose(lm, dt, now, aspect){
 
   Q.warn = body.hip.v < 0.4 ? 'Step back — I can’t see your hips' : '';
   if (Q === PL[0]) setHint(Q.warn || (Q.calib ? 'Hold still in the middle…' : sceneHint));
-  return { sm, data:{ h, sk, ex, fb }, handsOut };
+  Q.lastGood = now; Q.lastRes = { sm, data:{ h, sk, ex, fb }, handsOut };
+  return Q.lastRes;
 }
 
 const r2 = v => Math.round(v * 100) / 100;
@@ -435,6 +451,8 @@ const FBJ = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];   // nose, shou
 // Everything the TV's exercise game needs, as 15 small numbers (see EX in tv.html):
 // 0-3 wrists relative to shoulders · 4-5 knee rise · 6-7 ankle rise · 8 feet apart (1 = together) · 9 lean
 // 10 sideways hip shift · 11 shoulder drop · 12 movement energy · 13 legs visible · 14 arms visible
+// 18-19 arm extension L,R (wrist-to-shoulder / torso) · 20-21 how far the fists are in front of the shoulders (towards the camera)
+// 15-16 elbow sideways offset (L, R) · 17 shoulder-width ratio vs calibration (drops when you turn sideways)
 function exFeatures(sm, body, dt){
   const B = Q.base, T = B ? B.torso : body.torso, sh = body.sh, hip = body.hip;
   const q = i => sm[i];
@@ -458,9 +476,13 @@ function exFeatures(sm, body, dt){
   }
   Q.prevKey = KEY.map(i => [sm[i].X, sm[i].Y]);
   if (n) Q.mv += (e / n - Q.mv) * 0.3;
+  // punch features: how far each fist is from its own shoulder (arm extension) and how far in front of the shoulder it is (towards the camera)
+  const extL = Math.hypot(q(15).X - q(11).X, q(15).Y - q(11).Y) / T, extR = Math.hypot(q(16).X - q(12).X, q(16).Y - q(12).Y) / T;
+  const z = Q.lmz || [], asp = Q.aspect || 1, shz = ((z[11] || 0) + (z[12] || 0)) / 2;
+  const fwdL = ((shz - (z[15] || 0)) * asp) / T, fwdR = ((shz - (z[16] || 0)) * asp) / T;
   const legs = (sm[25].v + sm[26].v + sm[27].v + sm[28].v) / 4;
   const arms = (sm[13].v + sm[14].v + sm[15].v + sm[16].v) / 4;
-  return [r2(wl[0]), r2(wl[1]), r2(wr[0]), r2(wr[1]), r2(kuL), r2(kuR), r2(auL), r2(auR), r2(sepRatio), r2(lean), r2(hdx), r2(drop), r2(Q.mv), r2(legs), r2(arms)];
+  return [r2(wl[0]), r2(wl[1]), r2(wr[0]), r2(wr[1]), r2(kuL), r2(kuR), r2(auL), r2(auR), r2(sepRatio), r2(lean), r2(hdx), r2(drop), r2(Q.mv), r2(legs), r2(arms), r2((q(13).X - sh.X) / T), r2((q(14).X - sh.X) / T), r2(B && B.shW ? body.shW / B.shW : 1), r2(extL), r2(extR), r2(fwdL), r2(fwdR)];
 }
 
 // Run the finger model and give each hand to the nearest pose wrist
